@@ -58,5 +58,19 @@ test('Transcript Reader & Watcher Isolation', async (t) => {
     assert.strictEqual(watcher.activeConversationId, 'session-abc');
     assert.strictEqual(typeof watcher.readNewLines, 'function');
     watcher.stop();
+
+    // Auto-detect branch
+    const autoWatcher = new TranscriptWatcher({ brainDir: tmpBrain });
+    autoWatcher.start();
+    assert.strictEqual(autoWatcher.activeConversationId, 'session-abc');
+    autoWatcher.stop();
+
+    // Malformed session ID branch
+    const badWatcher = new TranscriptWatcher({ brainDir: tmpBrain });
+    badWatcher.start('invalid session id with spaces');
+    assert.strictEqual(badWatcher.watcher, null);
+
+    // readNewLines edge cases
+    autoWatcher.readNewLines(path.join(tmpBrain, 'non-existent-file.jsonl'));
   });
 });

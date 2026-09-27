@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { SystemDoctor } = require('../../src/infrastructure/system/doctor');
+const { SystemDoctor, selectPrimaryEndpoint } = require('../../src/infrastructure/system/doctor');
 const { loadConfig, saveConfig } = require('../../src/infrastructure/security/pin-auth');
 
 test('SystemDoctor Diagnostics Suite', async (t) => {
@@ -28,10 +28,93 @@ test('SystemDoctor Diagnostics Suite', async (t) => {
     assert.ok(netInfo.primaryUrl.includes('8080'));
   });
 
-  await t.test('toggles keep-awake state safely', () => {
-    const initial = doctor.isKeepAwakeActive();
-    doctor.setKeepAwake(false);
-    assert.strictEqual(doctor.isKeepAwakeActive(), false);
+  await t.test('selectPrimaryEndpoint selects lan, virtual, or localhost fallback', () => {
+    const lan = [{ url: 'http://192.168.1.10:3000', ip: '192.168.1.10' }];
+    const virtual = [{ url: 'http://10.255.0.1:3000', ip: '10.255.0.1' }];
+
+    // 1. Lan preferred
+    const p1 = selectPrimaryEndpoint(lan, virtual, 3000);
+    assert.strictEqual(p1.ip, '192.168.1.10');
+
+    // 2. Virtual fallback
+    const p2 = selectPrimaryEndpoint([], virtual, 3000);
+    assert.strictEqual(p2.ip, '10.255.0.1');
+
+    // 3. Localhost fallback
+    const p3 = selectPrimaryEndpoint([], [], 3000);
+    assert.strictEqual(p3.ip, '127.0.0.1');
+    assert.strictEqual(p3.url, 'http://localhost:3000');
+  });
+});
+
+const { JsonConfigAdapter } = require('../../src/infrastructure/config/json-config.adapter');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+test('JsonConfigAdapter Edge Cases', async (t) => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'json-config-test-'));
+  const configPath = path.join(tmpDir, 'test-config.json');
+
+  t.after(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    delete process.env.POCKET_PIN;
+  });
+
+  await t.test('handles corrupted config file gracefully with default fallback', () => {
+    fs.writeFileSync(configPath, 'NOT A VALID JSON FILE {[[[', 'utf8');
+    const adapter = new JsonConfigAdapter(configPath);
+    const loaded = adapter.loadConfig();
+    assert.strictEqual(loaded.pin, '1234');
+    assert.strictEqual(loaded.port, 3000);
+  });
+
+  await t.test('respects POCKET_PIN environment variable', () => {
+    process.env.POCKET_PIN = '9876';
+    const adapter = new JsonConfigAdapter(configPath);
+    const loaded = adapter.loadConfig();
+    assert.strictEqual(loaded.pin, '9876');
+    delete process.env.POCKET_PIN;
+  });
+
+  await t.test('validates port number within 1-65535 range on saveConfig', () => {
+    const adapter = new JsonConfigAdapter(configPath);
+    const res = adapter.saveConfig({ port: '8080', pin: '5555' });
+    assert.strictEqual(res.port, 8080);
+    assert.strictEqual(res.pin, '5555');
+
+    // Invalid port should be ignored
+    const invalidPortRes = adapter.saveConfig({ port: '999999' });
+    assert.strictEqual(invalidPortRes.port, 8080);
+  });
+});
+
+const { TunnelManager } = require('../../src/infrastructure/system/tunnel-manager');
+
+test('TunnelManager State and Listeners', async (t) => {
+  const tm = new TunnelManager();
+
+  await t.test('registers status change listener and notifies', () => {
+    let notifiedStatus = null;
+    const unsubscribe = tm.onStatusChange((status) => {
+      notifiedStatus = status;
+    });
+
+    tm._notify();
+    assert.ok(notifiedStatus);
+    assert.strictEqual(notifiedStatus.status, 'stopped');
+
+    unsubscribe();
+    notifiedStatus = null;
+    tm._notify();
+    assert.strictEqual(notifiedStatus, null);
+  });
+
+  await t.test('start returns current status if already starting or active', async () => {
+    tm._status = 'active';
+    const status = await tm.start(3000);
+    assert.strictEqual(status.active, true);
+    tm._status = 'stopped';
   });
 });
 

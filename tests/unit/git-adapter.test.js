@@ -88,6 +88,20 @@ test('GitAdapter Commit Suggestions and Operations', async (t) => {
     assert.strictEqual(adapter.generateSuggestedCommitMessage(['a.js', 'b.js', 'c.js']), 'feat: update 3 project files');
   });
 
+  await t.test('runGit executes system git commands and handles stdin and errors', async () => {
+    const version = await adapter.runGit(['--version'], process.cwd());
+    assert.ok(version.includes('git version'));
+
+    const hash = await adapter.runGit(['hash-object', '--stdin'], process.cwd(), 'hello-pocket');
+    assert.strictEqual(typeof hash, 'string');
+    assert.ok(hash.length >= 7);
+
+    await assert.rejects(
+      async () => adapter.runGit(['invalid-command-xyz'], process.cwd()),
+      /not a git command|is not a git command/i
+    );
+  });
+
   await t.test('acceptFile validates path and calls runGit', async () => {
     const invalidRes = await adapter.acceptFile('/fake', '');
     assert.strictEqual(invalidRes.success, false);
