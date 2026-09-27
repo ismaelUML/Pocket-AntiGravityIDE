@@ -1,22 +1,12 @@
+// Inyector de medios (imágenes y archivos) para el panel de chat de Antigravity.
+// Soporta cancelación con AbortSignal para interrumpir la carga y limpiar temporales si el cliente corta.
 const { execFile } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 const PS_SCRIPT_PATH = path.join(__dirname, 'native', 'media-injector.ps1');
 
-/**
- * Focuses Antigravity IDE, places image, file, or text onto clipboard, pastes (Ctrl+V) and submits (Enter).
- * @param {Object} options
- * @param {string} [options.imagePath=""] - Path to image file (PNG/JPG/WebP/BMP).
- * @param {string} [options.filePath=""] - Path to code/data file.
- * @param {string} [options.text=""] - Prompt text caption.
- * @param {string} [options.targetTitle="Antigravity"]
- * @param {string} [options.processName="Antigravity IDE"]
- * @param {number} [options.focusDelayMs=500]
- * @param {number} [options.pasteDelayMs=300]
- * @param {boolean} [options.submitEnter=true]
- * @returns {Promise<{success: boolean, hwnd: string, pid: number, title: string, imagePath: string, filePath: string, text: string, error: string|null}>}
- */
-function injectMedia(options = {}) {
+function buildMediaArgs(options) {
   const {
     imagePath = '',
     filePath = '',
@@ -28,78 +18,84 @@ function injectMedia(options = {}) {
     submitEnter = true
   } = options;
 
+  const args = [
+    '-NoProfile',
+    '-WindowStyle', 'Hidden',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', PS_SCRIPT_PATH,
+    '-ImagePath', imagePath,
+    '-FilePath', filePath,
+    '-Text', text,
+    '-TargetTitle', targetTitle,
+    '-ProcessName', processName,
+    '-FocusDelayMs', String(focusDelayMs),
+    '-PasteDelayMs', String(pasteDelayMs)
+  ];
+
+  if (!submitEnter) args.push('-SendEnter:$false');
+  return args;
+}
+
+function parseMediaOutput(stdout, { imagePath, filePath, text }) {
+  const trimmed = (stdout || '').trim();
+  const match = trimmed.match(/\{.*\}$/s);
+  if (!match) return null;
+
+  try {
+    const cleanJson = match[0].replace(/[\r\n\t]+/g, ' ');
+    const parsed = JSON.parse(cleanJson);
+    return {
+      success: Boolean(parsed.Success),
+      hwnd: parsed.HWND || '0x0',
+      pid: parsed.PID || 0,
+      title: parsed.Title || '',
+      imagePath: parsed.ImagePath || imagePath,
+      filePath: parsed.FilePath || filePath,
+      text: parsed.Text || text,
+      error: parsed.Error || null
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function injectMedia(options = {}) {
+  const { imagePath = '', filePath = '', text = '', signal } = options;
+  const args = buildMediaArgs(options);
+
   return new Promise((resolve) => {
-    const args = [
-      '-NoProfile',
-      '-WindowStyle', 'Hidden',
-      '-ExecutionPolicy', 'Bypass',
-      '-File', PS_SCRIPT_PATH,
-      '-ImagePath', imagePath,
-      '-FilePath', filePath,
-      '-Text', text,
-      '-TargetTitle', targetTitle,
-      '-ProcessName', processName,
-      '-FocusDelayMs', String(focusDelayMs),
-      '-PasteDelayMs', String(pasteDelayMs)
-    ];
+    const execOptions = { encoding: 'utf8', windowsHide: true };
+    if (signal) execOptions.signal = signal;
 
-    if (!submitEnter) {
-      args.push('-SendEnter:$false');
-    }
-
-    execFile('powershell.exe', args, { encoding: 'utf8', windowsHide: true }, (error, stdout, stderr) => {
+    execFile('powershell.exe', args, execOptions, (error, stdout, stderr) => {
       if (error) {
+        const isAborted = error.name === 'AbortError' || (signal && signal.aborted);
         return resolve({
           success: false,
+          aborted: isAborted,
           hwnd: '0x0',
           pid: 0,
           title: '',
           imagePath,
           filePath,
           text,
-          error: `Execution error: ${error.message}`
+          error: isAborted ? 'Media injection aborted by client.' : `Execution error: ${error.message}`
         });
       }
 
-      try {
-        const trimmed = (stdout || '').trim();
-        const jsonMatch = trimmed.match(/\{.*\}$/s);
-        if (jsonMatch) {
-          const cleanJson = jsonMatch[0].replace(/[\r\n\t]+/g, ' ');
-          const parsed = JSON.parse(cleanJson);
-          return resolve({
-            success: Boolean(parsed.Success),
-            hwnd: parsed.HWND || '0x0',
-            pid: parsed.PID || 0,
-            title: parsed.Title || '',
-            imagePath: parsed.ImagePath || imagePath,
-            filePath: parsed.FilePath || filePath,
-            text: parsed.Text || text,
-            error: parsed.Error || null
-          });
-        }
-        resolve({
-          success: false,
-          hwnd: '0x0',
-          pid: 0,
-          title: '',
-          imagePath,
-          filePath,
-          text,
-          error: `Unexpected output: ${trimmed || stderr}`
-        });
-      } catch (parseErr) {
-        resolve({
-          success: false,
-          hwnd: '0x0',
-          pid: 0,
-          title: '',
-          imagePath,
-          filePath,
-          text,
-          error: `JSON parse error: ${parseErr.message}. Raw output: ${stdout}`
-        });
-      }
+      const parsed = parseMediaOutput(stdout, { imagePath, filePath, text });
+      if (parsed) return resolve(parsed);
+
+      resolve({
+        success: false,
+        hwnd: '0x0',
+        pid: 0,
+        title: '',
+        imagePath,
+        filePath,
+        text,
+        error: `Unexpected output: ${(stdout || stderr).trim()}`
+      });
     });
   });
 }

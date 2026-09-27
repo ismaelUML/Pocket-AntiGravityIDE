@@ -7,12 +7,12 @@ const { triggerIdeAccept } = require('./diff-acceptor');
  * Windows Win32 OS automation adapter implementing IdeAutomationPort.
  */
 class Win32AutomationAdapter extends IdeAutomationPort {
-  constructor() {
+  constructor(options = {}) {
     super();
-    this.queue = new PromptQueue();
+    this.queue = new PromptQueue(options);
   }
 
-  async sendPrompt(prompt) {
+  async sendPrompt(prompt, options = {}) {
     return await this.queue.enqueue({
       text: prompt.text,
       filePath: prompt.filePath,
@@ -20,13 +20,13 @@ class Win32AutomationAdapter extends IdeAutomationPort {
       focusShortcut: prompt.focusShortcut,
       method: prompt.method,
       newChat: false
-    });
+    }, options.signal);
   }
 
-  async startNewConversation() {
+  async startNewConversation(options = {}) {
     return await this.queue.enqueue({
       newChat: true
-    });
+    }, options.signal);
   }
 
   async acceptFocusedHunk() {

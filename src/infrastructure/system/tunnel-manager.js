@@ -1,9 +1,10 @@
+// Gestor de túneles públicos con Circuit Breaker y Conmutación por Fallo (Failover).
+// A nadie le gusta que el túnel muera en medio de una demo remota o mientras estás en el colectivo.
+// Si Cloudflare se cae, se bloquea o agota timeouts, el Circuit Breaker entra en juego
+// y conmuta automáticamente a Localtunnel sin tirar errores en la cara del usuario.
 const { spawn, exec } = require('child_process');
+const { CircuitBreaker } = require('../resilience/circuit-breaker');
 
-/**
- * TunnelManager controls public remote access tunnels (Cloudflare / Localtunnel)
- * on demand without needing external terminal windows.
- */
 class TunnelManager {
   constructor() {
     this._process = null;
@@ -12,6 +13,11 @@ class TunnelManager {
     this._provider = null; // 'cloudflare' | 'localtunnel'
     this._error = null;
     this._listeners = new Set();
+    this.cfBreaker = new CircuitBreaker({
+      name: 'CloudflareTunnel',
+      failureThreshold: 2,
+      resetTimeoutMs: 60000
+    });
   }
 
   getStatus() {
@@ -20,7 +26,8 @@ class TunnelManager {
       status: this._status,
       publicUrl: this._publicUrl,
       provider: this._provider,
-      error: this._error
+      error: this._error,
+      circuitBreaker: this.cfBreaker.getState()
     };
   }
 
@@ -39,7 +46,7 @@ class TunnelManager {
   }
 
   /**
-   * Start a public tunnel to expose local port
+   * Start a public tunnel to expose local port with circuit-breaker protection
    * @param {number} port
    */
   start(port = 3000) {
@@ -49,60 +56,76 @@ class TunnelManager {
 
     this._status = 'starting';
     this._publicUrl = null;
-    this._provider = 'cloudflare';
     this._error = null;
     this._notify();
 
     return new Promise((resolve) => {
-      let resolved = false;
+      // Si el breaker detectó que Cloudflare viene fallando reiteradamente,
+      // no perdemos 30 segundos esperando el timeout: saltamos directo a Localtunnel.
+      if (this.cfBreaker.getState().state === 'OPEN') {
+        console.warn('[TunnelManager] Cloudflare circuit is OPEN. Bypassing straight to Localtunnel fallback.');
+        return this._startLocaltunnelFallback(port, resolve);
+      }
 
-      // 1. Try Cloudflare Tunnel first
-      const cfProc = spawn('cmd.exe', [
-        '/c', 'npx', '-y', 'cloudflared', 'tunnel', '--url', `http://localhost:${port}`
-      ], { windowsHide: true });
-
-      this._process = cfProc;
-
-      const handleOutput = (data) => {
-        const text = data.toString();
-        const matches = text.match(/https:\/\/(?!api\.)[a-zA-Z0-9-]+\.trycloudflare\.com/g);
-        if (matches && matches.length > 0 && !this._publicUrl) {
-          this._publicUrl = matches[0];
-          this._status = 'active';
-          this._provider = 'cloudflare';
-          this._notify();
-          if (!resolved) {
-            resolved = true;
-            resolve(this.getStatus());
-          }
-        }
-      };
-
-      cfProc.stdout.on('data', handleOutput);
-      cfProc.stderr.on('data', handleOutput);
-
-      cfProc.on('error', (err) => {
-        console.error('[TunnelManager] Cloudflare error:', err.message);
-      });
-
-      cfProc.on('close', (code) => {
-        if (!this._publicUrl && this._status === 'starting') {
-          console.log(`[TunnelManager] Cloudflare exited (code ${code}). Attempting localtunnel fallback...`);
-          this._startLocaltunnelFallback(port, resolve);
-        } else if (this._status === 'active') {
-          this._status = 'stopped';
-          this._publicUrl = null;
-          this._notify();
-        }
-      });
-
-      // Timeout safety: if after 30s no URL, fallback
-      setTimeout(() => {
-        if (this._status === 'starting' && !resolved) {
-          this._startLocaltunnelFallback(port, resolve);
-        }
-      }, 30000);
+      this._startCloudflare(port, resolve);
     });
+  }
+
+  _startCloudflare(port, resolve) {
+    let resolved = false;
+    this._provider = 'cloudflare';
+
+    const cfProc = spawn('cmd.exe', [
+      '/c', 'npx', '-y', 'cloudflared', 'tunnel', '--url', `http://localhost:${port}`
+    ], { windowsHide: true });
+
+    this._process = cfProc;
+
+    const handleOutput = (data) => {
+      const text = data.toString();
+      const matches = text.match(/https:\/\/(?!api\.)[a-zA-Z0-9-]+\.trycloudflare\.com/g);
+      if (matches && matches.length > 0 && !this._publicUrl) {
+        this._publicUrl = matches[0];
+        this._status = 'active';
+        this._provider = 'cloudflare';
+        this.cfBreaker._onSuccess();
+        this._notify();
+        if (!resolved) {
+          resolved = true;
+          resolve(this.getStatus());
+        }
+      }
+    };
+
+    cfProc.stdout.on('data', handleOutput);
+    cfProc.stderr.on('data', handleOutput);
+
+    cfProc.on('error', (err) => {
+      console.error('[TunnelManager] Cloudflare spawn error:', err.message);
+      this.cfBreaker._onFailure(err);
+    });
+
+    cfProc.on('close', (code) => {
+      if (!this._publicUrl && this._status === 'starting') {
+        console.log(`[TunnelManager] Cloudflare exited (code ${code}). Tripping breaker & triggering fallback...`);
+        this.cfBreaker._onFailure(new Error(`Exit code ${code}`));
+        this._startLocaltunnelFallback(port, resolve);
+      } else if (this._status === 'active') {
+        this._status = 'stopped';
+        this._publicUrl = null;
+        this._notify();
+      }
+    });
+
+    // 30 segundos de gracia: si Cloudflare se cuelga sin escupir URL,
+    // forzamos el failover al proveedor secundario.
+    setTimeout(() => {
+      if (this._status === 'starting' && !resolved) {
+        console.warn('[TunnelManager] Cloudflare provisioning timeout. Shifting to Localtunnel...');
+        this.cfBreaker._onFailure(new Error('Provisioning timeout'));
+        this._startLocaltunnelFallback(port, resolve);
+      }
+    }, 30000);
   }
 
   _startLocaltunnelFallback(port, resolve) {
@@ -135,13 +158,13 @@ class TunnelManager {
   }
 
   /**
-   * Stop any running tunnel process
+   * Stop any running tunnel process and kill the full process tree.
    */
   stop() {
     if (this._process) {
       const pid = this._process.pid;
       if (process.platform === 'win32' && pid) {
-        // Kill the whole process tree spawned by cmd.exe
+        // Matamos todo el arbol de procesos (/T) forzado (/F) para no dejar procesos zombis de cmd.exe ni node en el fondo
         exec(`taskkill /pid ${pid} /T /F`, () => {});
       } else {
         try {
