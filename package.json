@@ -5,13 +5,13 @@
   "main": "src/server.js",
   "author": "IvanCR48",
   "license": "MIT",
-  "homepage": "https://github.com/IvanCR48/Pocket-AntiGravityIDE#readme",
+  "homepage": "https://github.com/ismaelUML/Pocket-AntiGravityIDE#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/IvanCR48/Pocket-AntiGravityIDE.git"
+    "url": "git+https://github.com/ismaelUML/Pocket-AntiGravityIDE.git"
   },
   "bugs": {
-    "url": "https://github.com/IvanCR48/Pocket-AntiGravityIDE/issues"
+    "url": "https://github.com/ismaelUML/Pocket-AntiGravityIDE/issues"
   },
   "keywords": [
     "antigravity",
