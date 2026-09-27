@@ -1,11 +1,9 @@
 const { execFile } = require('child_process');
 const path = require('path');
 
-const PS_SCRIPT_PATH = path.join(__dirname, 'native', 'check-chat-state.ps1');
+const { PS_SYSTEM_BIN, extractJsonBlock } = require('./ps-parser');
 
-const PS_BIN = process.platform === 'win32'
-  ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  : 'powershell.exe';
+const PS_SCRIPT_PATH = path.join(__dirname, 'native', 'check-chat-state.ps1');
 
 /**
  * Detects whether Antigravity IDE Chat Panel is FOCUSED, OPENED, or CLOSED.
@@ -22,7 +20,7 @@ function getChatState(targetTitle = 'Antigravity IDE', processName = 'Antigravit
       '-ProcessName', processName
     ];
 
-    execFile(PS_BIN, args, { encoding: 'utf8', timeout: 2500, windowsHide: true }, (error, stdout, stderr) => {
+    execFile(PS_SYSTEM_BIN, args, { encoding: 'utf8', timeout: 2500, windowsHide: true }, (error, stdout, stderr) => {
       if (error) {
         if (stderr) console.error('[checkChatState] PowerShell stderr:', stderr.trim());
         return resolve({
@@ -34,15 +32,11 @@ function getChatState(targetTitle = 'Antigravity IDE', processName = 'Antigravit
         });
       }
 
-      try {
-        const trimmed = (stdout || '').trim();
-        const firstBrace = trimmed.indexOf('{');
-        const lastBrace = trimmed.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          const parsed = JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
-          return resolve({
-            windowFound: Boolean(parsed.WindowFound),
-            isWindowForeground: Boolean(parsed.IsWindowForeground),
+      const parsed = extractJsonBlock(stdout);
+      if (parsed) {
+        return resolve({
+          windowFound: Boolean(parsed.WindowFound),
+          isWindowForeground: Boolean(parsed.IsWindowForeground),
             isChatOpen: Boolean(parsed.IsChatOpen),
             isChatFocused: Boolean(parsed.IsChatFocused),
             stateString: parsed.StateString || 'CLOSED'

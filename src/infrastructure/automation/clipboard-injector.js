@@ -39,30 +39,20 @@ function buildArgs(options) {
   return args;
 }
 
-const PS_BIN = process.platform === 'win32'
-  ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  : 'powershell.exe';
+const { PS_SYSTEM_BIN, extractJsonBlock } = require('./ps-parser');
 
 function parseInjectorOutput(stdout, fallbackText) {
-  const trimmed = (stdout || '').trim();
-  const firstBrace = trimmed.indexOf('{');
-  const lastBrace = trimmed.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+  const parsed = extractJsonBlock(stdout);
+  if (!parsed) return null;
 
-  try {
-    const cleanJson = trimmed.slice(firstBrace, lastBrace + 1).replace(/[\r\n\t]+/g, ' ');
-    const parsed = JSON.parse(cleanJson);
-    return {
-      success: Boolean(parsed.Success),
-      hwnd: parsed.HWND || '0x0',
-      pid: parsed.PID || 0,
-      title: parsed.Title || '',
-      textInjected: parsed.TextInjected || fallbackText,
-      error: parsed.Error || null
-    };
-  } catch (_) {
-    return null;
-  }
+  return {
+    success: Boolean(parsed.Success),
+    hwnd: parsed.HWND || '0x0',
+    pid: parsed.PID || 0,
+    title: parsed.Title || '',
+    textInjected: parsed.TextInjected || fallbackText,
+    error: parsed.Error || null
+  };
 }
 
 function injectText(options = {}) {
@@ -73,7 +63,7 @@ function injectText(options = {}) {
     const execOptions = { encoding: 'utf8', windowsHide: true };
     if (signal) execOptions.signal = signal;
 
-    execFile(PS_BIN, args, execOptions, (error, stdout, stderr) => {
+    execFile(PS_SYSTEM_BIN, args, execOptions, (error, stdout, stderr) => {
       if (error) {
         const isAborted = error.name === 'AbortError' || (signal && signal.aborted);
         return resolve({

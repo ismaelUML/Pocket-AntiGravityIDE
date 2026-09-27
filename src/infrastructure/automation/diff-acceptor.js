@@ -1,9 +1,6 @@
 const { spawn } = require('child_process');
 const path = require('path');
-
-const PS_BIN = process.platform === 'win32'
-  ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-  : 'powershell.exe';
+const { PS_SYSTEM_BIN } = require('./ps-parser');
 
 /**
  * Triggers native Alt+Enter hunk acceptance in Antigravity IDE via Win32.
@@ -12,7 +9,7 @@ const PS_BIN = process.platform === 'win32'
 function triggerIdeAccept() {
   return new Promise((resolve) => {
     const psScript = path.join(__dirname, 'native', 'diff-acceptor.ps1');
-    const child = spawn(PS_BIN, [
+    const child = spawn(PS_SYSTEM_BIN, [
       '-NoProfile',
       '-WindowStyle', 'Hidden',
       '-ExecutionPolicy', 'Bypass',
