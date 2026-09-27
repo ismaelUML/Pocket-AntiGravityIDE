@@ -21,8 +21,10 @@ try {
     const parts = match.trim().split(/\s+/);
     const pid = parts[parts.length - 1];
     if (pid && !isNaN(pid)) {
-      console.log(`${rgb(COLORS.yellow[0], COLORS.yellow[1], COLORS.yellow[2], '[*]')} Closing host listener on PID ${pid}...`);
-      execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+      console.log(`${rgb(COLORS.yellow[0], COLORS.yellow[1], COLORS.yellow[2], '[*]')} Closing host listener on PID ${pid} (killing full process tree)...`);
+      // Matado en árbol (/T) obligatorio: si Node levantó túneles o scripts PowerShell hijos,
+      // sin /T quedan flotando como procesos zombis chupando CPU.
+      execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
     }
   } else {
     console.log(`${rgb(COLORS.gray[0], COLORS.gray[1], COLORS.gray[2], '[*]')} No process found listening on port 3000.`);

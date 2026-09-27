@@ -84,9 +84,11 @@ async function runTunnel() {
 
 async function runDashboard() {
   console.log(`\n${rgb(COLORS.blurple[0], COLORS.blurple[1], COLORS.blurple[2], '[*]')} Abriendo Desktop Control Center...`);
+  // Protección de streams estándar: si se lanza desde un script o servicio sin TTY,
+  // 'inherit' explota con EBADF al intentar conectar salidas nulas.
   const dashProc = spawn('node', ['bin/dashboard.js'], {
     detached: true,
-    stdio: 'inherit'
+    stdio: process.stdout && process.stdout.isTTY ? 'inherit' : 'ignore'
   });
   dashProc.unref();
 }
