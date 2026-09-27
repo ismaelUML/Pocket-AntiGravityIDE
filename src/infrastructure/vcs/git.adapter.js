@@ -78,13 +78,17 @@ const GIT_BIN = (function resolveGitBin() {
 })();
 
 class GitAdapter extends VcsPort {
-  runGit(args, cwd) {
+  runGit(args, cwd, stdinContent = null) {
     return new Promise((resolve, reject) => {
       const safeArgs = args.map(arg => String(arg).replace(/\0/g, ''));
-      execFile(GIT_BIN, safeArgs, { cwd, maxBuffer: 10 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+      const child = execFile(GIT_BIN, safeArgs, { cwd, maxBuffer: 10 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
         if (err) return reject(new Error(stderr || err.message));
         resolve(stdout.trim());
       });
+      if (stdinContent && child.stdin) {
+        child.stdin.write(stdinContent);
+        child.stdin.end();
+      }
     });
   }
 
@@ -260,9 +264,9 @@ class GitAdapter extends VcsPort {
 
   async commit(workspaceRoot, message) {
     try {
-      const cleanMessage = String(message || '').trim().replace(/^[-]+/, '');
+      const cleanMessage = String(message || '').trim();
       if (!cleanMessage) {
-        return { success: false, error: 'Commit message cannot be empty or flag-only.' };
+        return { success: false, error: 'Commit message cannot be empty.' };
       }
 
       const staged = await this.getStagedChanges(workspaceRoot);
@@ -270,7 +274,7 @@ class GitAdapter extends VcsPort {
         return { success: false, error: 'No staged changes to commit. Stage files first.' };
       }
 
-      const stdout = await this.runGit(['commit', '-m', cleanMessage, '--'], workspaceRoot);
+      const stdout = await this.runGit(['commit', '-F', '-'], workspaceRoot, cleanMessage);
       const commitHash = await this.runGit(['rev-parse', '--short', 'HEAD'], workspaceRoot).catch(() => 'unknown');
       const branchInfo = await this.getBranchInfo(workspaceRoot);
 
@@ -290,15 +294,15 @@ class GitAdapter extends VcsPort {
   async push(workspaceRoot, remote = 'origin', branch) {
     try {
       const branchInfo = await this.getBranchInfo(workspaceRoot);
-      const targetBranch = String(branch || branchInfo.branch || 'main').trim().replace(/^[-]+/, '');
-      const targetRemote = String(remote || branchInfo.remote || 'origin').trim().replace(/^[-]+/, '');
+      const safeBranch = String(branch || branchInfo.branch || 'main').trim().replace(/[^a-zA-Z0-9_\-\/]/g, '');
+      const safeRemote = String(remote || branchInfo.remote || 'origin').trim().replace(/[^a-zA-Z0-9_\-]/g, '');
 
-      const stdout = await this.runGit(['push', '--', targetRemote, targetBranch], workspaceRoot);
+      const stdout = await this.runGit(['push', '--', safeRemote, safeBranch], workspaceRoot);
       return {
         success: true,
-        remote: targetRemote,
-        branch: targetBranch,
-        output: stdout || `Pushed to ${targetRemote}/${targetBranch}`
+        remote: safeRemote,
+        branch: safeBranch,
+        output: stdout || `Pushed to ${safeRemote}/${safeBranch}`
       };
     } catch (err) {
       return { success: false, error: err.message };

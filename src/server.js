@@ -80,11 +80,11 @@ const PORT = process.env.PORT || config.port || 3000;
 // Restricción Quirúrgica de Orígenes (CORS estricto)
 app.use(createCorsMiddleware({ tunnelManager, activePort: PORT }));
 
-app.use(express.json({ limit: '8mb' }));
-app.use(express.urlencoded({ extended: true, limit: '8mb' }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// Configure Multer with safe limits and cryptographically random filenames
+// Configure Multer with safe limits under 8MB (Sonar S5693) and cryptographically random filenames
 const uploadDir = path.join(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const storage = multer.diskStorage({
@@ -96,7 +96,12 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 8 * 1024 * 1024 }
+  limits: {
+    fileSize: 5000000,
+    fieldSize: 1000000,
+    fields: 10,
+    files: 1
+  }
 });
 
 // WebSocket Handler con Origin Guard
