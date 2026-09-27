@@ -3,6 +3,7 @@
 // abierta en una pestaña del navegador del usuario (ej. evil.com) puede hacer fetch()
 // silenciosos contra http://localhost:3000 y ejecutar código o robar archivos locales.
 // Esta guarda sólo autoriza localhost, IPs privadas de la LAN local y el túnel público activo.
+const os = require('os');
 
 function isLocalOrPrivateIp(hostname) {
   if (!hostname) return false;
@@ -47,6 +48,38 @@ function isOriginAllowed(origin, { tunnelManager, activePort } = {}) {
   }
 }
 
+function getAllowedOrigins({ tunnelManager, activePort } = {}) {
+  const port = activePort || 3000;
+  const list = [
+    `http://localhost:${port}`,
+    `http://127.0.0.1:${port}`,
+    `https://localhost:${port}`,
+    `https://127.0.0.1:${port}`,
+    'http://localhost',
+    'http://127.0.0.1'
+  ];
+
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const netList of Object.values(interfaces)) {
+      if (!netList) continue;
+      for (const net of netList) {
+        if (net.family === 'IPv4' || net.family === 4) {
+          list.push(`http://${net.address}:${port}`);
+          list.push(`https://${net.address}:${port}`);
+        }
+      }
+    }
+  } catch (_) {}
+
+  if (tunnelManager && typeof tunnelManager.getStatus === 'function') {
+    const pub = tunnelManager.getStatus().publicUrl;
+    if (pub) list.push(pub);
+  }
+
+  return list;
+}
+
 /**
  * Middleware para Express con bloqueo estricto de CORS
  */
@@ -66,8 +99,13 @@ function createCorsMiddleware({ tunnelManager, activePort } = {}) {
     }
 
     const sanitizedOrigin = `${parsedUrl.protocol}//${parsedUrl.host}`;
+    const allowedList = getAllowedOrigins({ tunnelManager, activePort });
 
-    if (!isOriginAllowed(sanitizedOrigin, { tunnelManager, activePort })) {
+    if (isOriginAllowed(sanitizedOrigin, { tunnelManager, activePort }) && !allowedList.includes(sanitizedOrigin)) {
+      allowedList.push(sanitizedOrigin);
+    }
+
+    if (!allowedList.includes(sanitizedOrigin)) {
       const safeLog = sanitizedOrigin.replace(/[\r\n\x00-\x1f\x7f-\x9f]/g, '');
       console.warn(`[Security] Blocked unauthorized cross-origin request from: ${safeLog}`);
       return res.status(403).json({
@@ -76,7 +114,7 @@ function createCorsMiddleware({ tunnelManager, activePort } = {}) {
       });
     }
 
-    // Permitir sólo al origen legítimo verificado y normalizado
+    // Permitir sólo al origen explícitamente verificado en la lista de permitidos
     res.setHeader('Access-Control-Allow-Origin', sanitizedOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Pocket-Token');

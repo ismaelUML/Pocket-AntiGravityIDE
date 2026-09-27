@@ -151,8 +151,10 @@ class GitAdapter extends VcsPort {
 
   async acceptFile(workspaceRoot, filePath) {
     try {
-      await this.runGit(['add', '--', filePath], workspaceRoot);
-      return { success: true, message: `File ${filePath} staged in Git.` };
+      const cleanPath = String(filePath || '').replace(/^[-]+/, '');
+      if (!cleanPath) return { success: false, error: 'Invalid file path' };
+      await this.runGit(['add', '--', cleanPath], workspaceRoot);
+      return { success: true, message: `File ${cleanPath} staged in Git.` };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -171,10 +173,12 @@ class GitAdapter extends VcsPort {
 
   async rejectFile(workspaceRoot, filePath) {
     try {
-      await this.runGit(['restore', '--', filePath], workspaceRoot).catch(async () => {
-        await this.runGit(['clean', '-f', '--', filePath], workspaceRoot).catch(() => {});
+      const cleanPath = String(filePath || '').replace(/^[-]+/, '');
+      if (!cleanPath) return { success: false, error: 'Invalid file path' };
+      await this.runGit(['restore', '--', cleanPath], workspaceRoot).catch(async () => {
+        await this.runGit(['clean', '-f', '--', cleanPath], workspaceRoot).catch(() => {});
       });
-      return { success: true, message: `File ${filePath} reverted.` };
+      return { success: true, message: `File ${cleanPath} reverted.` };
     } catch (err) {
       return { success: false, error: err.message };
     }

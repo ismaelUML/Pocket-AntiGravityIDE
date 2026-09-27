@@ -80,8 +80,8 @@ const PORT = process.env.PORT || config.port || 3000;
 // Restricción Quirúrgica de Orígenes (CORS estricto)
 app.use(createCorsMiddleware({ tunnelManager, activePort: PORT }));
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '8mb' }));
+app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Configure Multer with safe limits and cryptographically random filenames
@@ -96,7 +96,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 25 * 1024 * 1024 }
+  limits: { fileSize: 8 * 1024 * 1024 }
 });
 
 // WebSocket Handler con Origin Guard

@@ -13,6 +13,10 @@ async function handleGetChanges(reviewChangesUseCase, req, res) {
 async function handleAcceptChanges(reviewChangesUseCase, onChangesBroadcast, req, res) {
   const root = getActiveWorkspaceRoot();
   const { file } = req.body || {};
+  if (file && (typeof file !== 'string' || file.startsWith('-') || !/^[a-zA-Z0-9_\-./\\]+$/.test(file))) {
+    return res.status(400).json({ success: false, error: 'Invalid file parameter' });
+  }
+
   const result = file
     ? await reviewChangesUseCase.acceptFile(root, file)
     : await reviewChangesUseCase.acceptAll(root);
@@ -24,6 +28,10 @@ async function handleAcceptChanges(reviewChangesUseCase, onChangesBroadcast, req
 async function handleRejectChanges(reviewChangesUseCase, onChangesBroadcast, req, res) {
   const root = getActiveWorkspaceRoot();
   const { file } = req.body || {};
+  if (file && (typeof file !== 'string' || file.startsWith('-') || !/^[a-zA-Z0-9_\-./\\]+$/.test(file))) {
+    return res.status(400).json({ success: false, error: 'Invalid file parameter' });
+  }
+
   const result = file
     ? await reviewChangesUseCase.rejectFile(root, file)
     : await reviewChangesUseCase.rejectAll(root);
@@ -51,15 +59,23 @@ async function handleCommitChanges(reviewChangesUseCase, onChangesBroadcast, req
     const root = getActiveWorkspaceRoot();
     const { message, push = true, remote, branch } = req.body || {};
 
-    if (!message || !message.trim()) {
+    if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ success: false, error: 'Commit message is required.' });
     }
 
+    const safeMessage = message.trim().replace(/^[-]+/, '');
+    if (!safeMessage) {
+      return res.status(400).json({ success: false, error: 'Invalid commit message.' });
+    }
+
+    const safeRemote = remote && typeof remote === 'string' ? remote.trim().replace(/^[-]+/, '') : undefined;
+    const safeBranch = branch && typeof branch === 'string' ? branch.trim().replace(/^[-]+/, '') : undefined;
+
     const result = await reviewChangesUseCase.commitChanges(root, {
-      message: message.trim(),
+      message: safeMessage,
       push: Boolean(push),
-      remote,
-      branch
+      remote: safeRemote,
+      branch: safeBranch
     });
 
     if (typeof onChangesBroadcast === 'function') onChangesBroadcast();
