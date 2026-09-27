@@ -6,6 +6,12 @@ const path = require('path');
 const chokidar = require('chokidar');
 const { DEFAULT_BRAIN_DIR, listSessions } = require('./reader');
 
+function sanitizeSessionId(id) {
+  if (typeof id !== 'string') return null;
+  const cleaned = path.basename(id.trim());
+  return /^[a-zA-Z0-9_-]+$/.test(cleaned) ? cleaned : null;
+}
+
 class TranscriptWatcher {
   constructor(options = {}) {
     this.brainDir = options.brainDir || DEFAULT_BRAIN_DIR;
@@ -25,20 +31,21 @@ class TranscriptWatcher {
       }
     }
 
-    if (!this.activeConversationId) {
+    const safeId = sanitizeSessionId(this.activeConversationId);
+    if (!safeId) {
       console.log("[Watcher] No active conversation found to watch.");
       return;
     }
 
-    const transcriptPath = path.join(
-      this.brainDir,
-      this.activeConversationId,
-      '.system_generated',
-      'logs',
-      'transcript.jsonl'
-    );
+    const safeBase = path.resolve(this.brainDir);
+    const transcriptPath = path.resolve(safeBase, safeId, '.system_generated', 'logs', 'transcript.jsonl');
+    if (!transcriptPath.startsWith(safeBase)) {
+      console.error("[Watcher] Path traversal attempt blocked.");
+      return;
+    }
 
-    console.log(`[Watcher] Watching transcript log: ${transcriptPath}`);
+    const safeLogPath = transcriptPath.replace(/[\r\n]/g, '');
+    console.log(`[Watcher] Watching transcript log: ${safeLogPath}`);
 
     // Si la conversación ya tiene historia, clavamos el puntero al final del archivo.
     // No queremos bombardear al celular con los 200 mensajes viejos que ya ocurrieron.

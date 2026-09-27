@@ -62,10 +62,26 @@ function buildUntrackedFileDiff(workspaceRoot, filePath) {
   });
 }
 
+const GIT_BIN = (function resolveGitBin() {
+  if (process.platform === 'win32') {
+    const candidates = [
+      'C:\\Program Files\\Git\\cmd\\git.exe',
+      'C:\\Program Files\\Git\\bin\\git.exe',
+      'C:\\Program Files (x86)\\Git\\cmd\\git.exe'
+    ];
+    for (const cp of candidates) {
+      if (fs.existsSync(cp)) return cp;
+    }
+    return 'git.exe';
+  }
+  return fs.existsSync('/usr/bin/git') ? '/usr/bin/git' : 'git';
+})();
+
 class GitAdapter extends VcsPort {
   runGit(args, cwd) {
     return new Promise((resolve, reject) => {
-      execFile('git', args, { cwd, maxBuffer: 10 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+      const safeArgs = args.map(arg => String(arg).replace(/\0/g, ''));
+      execFile(GIT_BIN, safeArgs, { cwd, maxBuffer: 10 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
         if (err) return reject(new Error(stderr || err.message));
         resolve(stdout.trim());
       });
@@ -240,9 +256,9 @@ class GitAdapter extends VcsPort {
 
   async commit(workspaceRoot, message) {
     try {
-      const cleanMessage = (message || '').trim();
+      const cleanMessage = String(message || '').trim().replace(/^[-]+/, '');
       if (!cleanMessage) {
-        return { success: false, error: 'Commit message cannot be empty.' };
+        return { success: false, error: 'Commit message cannot be empty or flag-only.' };
       }
 
       const staged = await this.getStagedChanges(workspaceRoot);
@@ -250,7 +266,7 @@ class GitAdapter extends VcsPort {
         return { success: false, error: 'No staged changes to commit. Stage files first.' };
       }
 
-      const stdout = await this.runGit(['commit', '-m', cleanMessage], workspaceRoot);
+      const stdout = await this.runGit(['commit', '-m', cleanMessage, '--'], workspaceRoot);
       const commitHash = await this.runGit(['rev-parse', '--short', 'HEAD'], workspaceRoot).catch(() => 'unknown');
       const branchInfo = await this.getBranchInfo(workspaceRoot);
 
@@ -270,10 +286,10 @@ class GitAdapter extends VcsPort {
   async push(workspaceRoot, remote = 'origin', branch) {
     try {
       const branchInfo = await this.getBranchInfo(workspaceRoot);
-      const targetBranch = branch || branchInfo.branch || 'main';
-      const targetRemote = remote || branchInfo.remote || 'origin';
+      const targetBranch = String(branch || branchInfo.branch || 'main').trim().replace(/^[-]+/, '');
+      const targetRemote = String(remote || branchInfo.remote || 'origin').trim().replace(/^[-]+/, '');
 
-      const stdout = await this.runGit(['push', targetRemote, targetBranch], workspaceRoot);
+      const stdout = await this.runGit(['push', '--', targetRemote, targetBranch], workspaceRoot);
       return {
         success: true,
         remote: targetRemote,

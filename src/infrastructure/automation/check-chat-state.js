@@ -3,6 +3,10 @@ const path = require('path');
 
 const PS_SCRIPT_PATH = path.join(__dirname, 'native', 'check-chat-state.ps1');
 
+const PS_BIN = process.platform === 'win32'
+  ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  : 'powershell.exe';
+
 /**
  * Detects whether Antigravity IDE Chat Panel is FOCUSED, OPENED, or CLOSED.
  * @returns {Promise<{windowFound: boolean, isWindowForeground: boolean, isChatOpen: boolean, isChatFocused: boolean, stateString: string}>}
@@ -18,7 +22,7 @@ function getChatState(targetTitle = 'Antigravity IDE', processName = 'Antigravit
       '-ProcessName', processName
     ];
 
-    execFile('powershell.exe', args, { encoding: 'utf8', timeout: 2500, windowsHide: true }, (error, stdout, stderr) => {
+    execFile(PS_BIN, args, { encoding: 'utf8', timeout: 2500, windowsHide: true }, (error, stdout, stderr) => {
       if (error) {
         if (stderr) console.error('[checkChatState] PowerShell stderr:', stderr.trim());
         return resolve({
@@ -32,11 +36,10 @@ function getChatState(targetTitle = 'Antigravity IDE', processName = 'Antigravit
 
       try {
         const trimmed = (stdout || '').trim();
-        // PowerShell a veces escupe basura de perfiles, banners o advertencias antes del JSON.
-        // Si hacemos JSON.parse(stdout) directo, revienta; por eso buscamos el último bloque { ... }.
-        const jsonMatch = trimmed.match(/\{.*\}$/s);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
+        const firstBrace = trimmed.indexOf('{');
+        const lastBrace = trimmed.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          const parsed = JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
           return resolve({
             windowFound: Boolean(parsed.WindowFound),
             isWindowForeground: Boolean(parsed.IsWindowForeground),

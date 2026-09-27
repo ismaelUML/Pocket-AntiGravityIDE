@@ -90,7 +90,7 @@ function parseToken(token) {
 // Validamos edad del token.
 // Dejamos 1 minuto de changüí por si el reloj del celular esta ligeramente desfasado con la PC.
 function isTokenFresh(timestamp) {
-  if (isNaN(timestamp)) return false;
+  if (Number.isNaN(timestamp)) return false;
   const age = Date.now() - timestamp;
   return age <= MAX_TOKEN_AGE_MS && age >= -60000;
 }

@@ -39,13 +39,18 @@ function buildArgs(options) {
   return args;
 }
 
+const PS_BIN = process.platform === 'win32'
+  ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  : 'powershell.exe';
+
 function parseInjectorOutput(stdout, fallbackText) {
   const trimmed = (stdout || '').trim();
-  const match = trimmed.match(/\{.*\}$/s);
-  if (!match) return null;
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
 
   try {
-    const cleanJson = match[0].replace(/[\r\n\t]+/g, ' ');
+    const cleanJson = trimmed.slice(firstBrace, lastBrace + 1).replace(/[\r\n\t]+/g, ' ');
     const parsed = JSON.parse(cleanJson);
     return {
       success: Boolean(parsed.Success),
@@ -68,7 +73,7 @@ function injectText(options = {}) {
     const execOptions = { encoding: 'utf8', windowsHide: true };
     if (signal) execOptions.signal = signal;
 
-    execFile('powershell.exe', args, execOptions, (error, stdout, stderr) => {
+    execFile(PS_BIN, args, execOptions, (error, stdout, stderr) => {
       if (error) {
         const isAborted = error.name === 'AbortError' || (signal && signal.aborted);
         return resolve({

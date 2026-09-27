@@ -52,22 +52,32 @@ function isOriginAllowed(origin, { tunnelManager, activePort } = {}) {
  */
 function createCorsMiddleware({ tunnelManager, activePort } = {}) {
   return (req, res, next) => {
-    const origin = req.headers.origin;
+    const rawOrigin = req.headers.origin;
 
-    if (!origin) {
+    if (!rawOrigin) {
       return next();
     }
 
-    if (!isOriginAllowed(origin, { tunnelManager, activePort })) {
-      console.warn(`[Security] Blocked unauthorized cross-origin request from: ${origin}`);
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(rawOrigin);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: 'Malformed Origin Header' });
+    }
+
+    const sanitizedOrigin = `${parsedUrl.protocol}//${parsedUrl.host}`;
+
+    if (!isOriginAllowed(sanitizedOrigin, { tunnelManager, activePort })) {
+      const safeLog = sanitizedOrigin.replace(/[\r\n\x00-\x1f\x7f-\x9f]/g, '');
+      console.warn(`[Security] Blocked unauthorized cross-origin request from: ${safeLog}`);
       return res.status(403).json({
         success: false,
         error: 'Forbidden: Cross-Origin Request Blocked by Surgical Origin Guard.'
       });
     }
 
-    // Permitir sólo al origen legítimo verificado
-    res.setHeader('Access-Control-Allow-Origin', origin);
+    // Permitir sólo al origen legítimo verificado y normalizado
+    res.setHeader('Access-Control-Allow-Origin', sanitizedOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Pocket-Token');
     res.setHeader('Access-Control-Allow-Credentials', 'true');

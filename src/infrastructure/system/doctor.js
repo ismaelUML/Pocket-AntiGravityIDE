@@ -2,9 +2,14 @@
 // Complejidad ciclomática reducida (<= 5 por función).
 // Manejo defensivo de adaptadores virtuales y estados de suspensión de Windows.
 const os = require('os');
+const path = require('path');
 const { exec, spawn } = require('child_process');
 const { promisify } = require('util');
 const execAsync = promisify(exec);
+
+const PS_BIN = process.platform === 'win32'
+  ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  : 'powershell.exe';
 
 // Filtramos adaptadores virtuales molestos (WSL, Hyper-V, Tailscale, ZeroTier).
 // Si le mostramos al usuario la IP de WSL en el código QR, el celular intenta
@@ -52,7 +57,7 @@ class SystemDoctor {
     ]);
 
     const nodeVersion = process.version;
-    const nodeMajor = parseInt(nodeVersion.slice(1).split('.')[0], 10);
+    const nodeMajor = Number.parseInt(nodeVersion.slice(1).split('.')[0], 10);
 
     return {
       timestamp: new Date().toISOString(),
@@ -130,7 +135,7 @@ class SystemDoctor {
         while($true) { Start-Sleep -Seconds 60 }
       `;
 
-      this._keepAwakeProcess = spawn('powershell.exe', [
+      this._keepAwakeProcess = spawn(PS_BIN, [
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-Command', psScript

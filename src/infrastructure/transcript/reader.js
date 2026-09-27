@@ -72,6 +72,12 @@ function listSessions(brainDir = DEFAULT_BRAIN_DIR) {
   }
 }
 
+function sanitizeSessionId(id) {
+  if (typeof id !== 'string') return null;
+  const cleaned = path.basename(id.trim());
+  return /^[a-zA-Z0-9_-]+$/.test(cleaned) ? cleaned : null;
+}
+
 /**
  * Reads full transcript steps for a specific conversation ID.
  * @param {string} conversationId
@@ -79,8 +85,12 @@ function listSessions(brainDir = DEFAULT_BRAIN_DIR) {
  * @returns {Promise<Array<{stepIndex: number, role: string, content: string, type: string, toolCalls: Array, timestamp: string}>>}
  */
 async function readTranscript(conversationId, brainDir = DEFAULT_BRAIN_DIR) {
-  const transcriptPath = path.join(brainDir, conversationId, '.system_generated', 'logs', 'transcript.jsonl');
-  if (!fs.existsSync(transcriptPath)) return [];
+  const safeId = sanitizeSessionId(conversationId);
+  if (!safeId) return [];
+
+  const safeBase = path.resolve(brainDir);
+  const transcriptPath = path.resolve(safeBase, safeId, '.system_generated', 'logs', 'transcript.jsonl');
+  if (!transcriptPath.startsWith(safeBase) || !fs.existsSync(transcriptPath)) return [];
 
   const fileStream = fs.createReadStream(transcriptPath);
   const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });

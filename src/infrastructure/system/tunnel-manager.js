@@ -3,7 +3,12 @@
 // Si Cloudflare se cae, se bloquea o agota timeouts, el Circuit Breaker entra en juego
 // y conmuta automáticamente a Localtunnel sin tirar errores en la cara del usuario.
 const { spawn, exec } = require('child_process');
+const path = require('path');
 const { CircuitBreaker } = require('../resilience/circuit-breaker');
+
+const CMD_BIN = process.platform === 'win32'
+  ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe')
+  : 'sh';
 
 class TunnelManager {
   constructor() {
@@ -75,7 +80,7 @@ class TunnelManager {
     let resolved = false;
     this._provider = 'cloudflare';
 
-    const cfProc = spawn('cmd.exe', [
+    const cfProc = spawn(CMD_BIN, [
       '/c', 'npx', '-y', 'cloudflared', 'tunnel', '--url', `http://localhost:${port}`
     ], { windowsHide: true });
 
@@ -130,7 +135,7 @@ class TunnelManager {
 
   _startLocaltunnelFallback(port, resolve) {
     this._provider = 'localtunnel';
-    const ltProc = spawn('cmd.exe', [
+    const ltProc = spawn(CMD_BIN, [
       '/c', 'npx', '-y', 'localtunnel', '--port', String(port), '--local-host', 'localhost'
     ], { windowsHide: true });
 

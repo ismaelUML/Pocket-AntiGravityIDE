@@ -42,8 +42,8 @@ class JsonConfigAdapter extends ConfigPort {
       next.pin = String(updates.pin).trim();
     }
     if (updates.port !== undefined) {
-      const p = parseInt(updates.port, 10);
-      if (!isNaN(p) && p > 0 && p < 65536) next.port = p;
+      const p = Number.parseInt(updates.port, 10);
+      if (!Number.isNaN(p) && p > 0 && p < 65536) next.port = p;
     }
 
     try {
