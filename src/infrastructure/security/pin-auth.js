@@ -6,10 +6,9 @@
 // Además: 5 intentos fallidos activan un bloqueo de 5 minutos para que nadie en una red Wi-Fi
 // compartida intente adivinar el PIN de 4 dígitos por fuerza bruta.
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+const { JsonConfigAdapter, DEFAULT_CONFIG_PATH } = require('../config/json-config.adapter');
 
-const CONFIG_PATH = path.join(__dirname, '..', '..', '..', 'pocket.config.json');
+const configAdapter = new JsonConfigAdapter(DEFAULT_CONFIG_PATH);
 const SERVER_SECRET = crypto.randomBytes(32).toString('hex');
 
 // Token Validity: 24 Hours
@@ -22,37 +21,18 @@ const LOCKOUT_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 let failedAttempts = 0;
 let lockoutUntil = 0;
 
-/**
- * Loads configuration from pocket.config.json or environment.
- * @returns {{pin: string, port: number, workspaceRoot?: string}}
- */
 function loadConfig() {
-  let config = { pin: '1234', port: 3000 };
-
-  try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-      config = { ...config, ...JSON.parse(raw) };
-    }
-  } catch (err) {
-    console.warn('[Auth] Could not read pocket.config.json:', err.message);
-  }
-
-  if (process.env.POCKET_PIN !== undefined) {
-    config.pin = process.env.POCKET_PIN;
-  }
-
+  const config = configAdapter.loadConfig();
   if (config.pin === '1234') {
     console.warn('⚠️  [Security Warning] Using default PIN "1234". Set a custom PIN in pocket.config.json for secure remote access.');
   }
-
   return config;
 }
 
-/**
- * Checks if authentication is currently rate-limited due to failed attempts.
- * @returns {boolean}
- */
+function saveConfig(updates) {
+  return configAdapter.saveConfig(updates);
+}
+
 function isRateLimited() {
   if (Date.now() < lockoutUntil) return true;
   if (lockoutUntil && Date.now() >= lockoutUntil) {
@@ -62,19 +42,11 @@ function isRateLimited() {
   return false;
 }
 
-/**
- * Returns remaining seconds of lockout.
- * @returns {number}
- */
 function getRemainingLockoutSeconds() {
   if (!isRateLimited()) return 0;
   return Math.ceil((lockoutUntil - Date.now()) / 1000);
 }
 
-/**
- * Records a failed authentication attempt.
- * @returns {{failedAttempts: number, isLocked: boolean, remainingSeconds: number}}
- */
 function recordFailedAttempt() {
   failedAttempts++;
   if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
@@ -87,58 +59,49 @@ function recordFailedAttempt() {
   };
 }
 
-/**
- * Resets failed attempts after successful authentication.
- */
 function resetFailedAttempts() {
   failedAttempts = 0;
   lockoutUntil = 0;
 }
 
-/**
- * Generates an HMAC signed token with timestamp for authenticated sessions.
- * @param {string} pin
- * @returns {string}
- */
 function generateToken(pin) {
   const payload = `${pin}:${Date.now()}`;
   const hmac = crypto.createHmac('sha256', SERVER_SECRET).update(payload).digest('hex');
   return Buffer.from(`${payload}:${hmac}`).toString('base64');
 }
 
-/**
- * Validates a session token including signature and 24-hour expiration.
- * @param {string} token
- * @returns {boolean}
- */
-function validateToken(token) {
-  const config = loadConfig();
-  if (!config.pin) return true;
-  if (!token) return false;
-
+// Desarmamos el payload del token base64 en sus 3 partes.
+// Si alguien manda basura o caracteres no imprimibles, cortamos aca nomas.
+function parseToken(token) {
   try {
     const decoded = Buffer.from(token, 'base64').toString('utf8');
     const parts = decoded.split(':');
-    if (parts.length < 3) return false;
+    if (parts.length < 3) return null;
+    return {
+      pin: parts[0],
+      timestamp: Number(parts[1]),
+      hmac: parts.slice(2).join(':')
+    };
+  } catch (_) {
+    return null;
+  }
+}
 
-    const pin = parts[0];
-    const timestamp = Number(parts[1]);
-    const hmac = parts.slice(2).join(':');
+// Validamos edad del token.
+// Dejamos 1 minuto de changüí por si el reloj del celular esta ligeramente desfasado con la PC.
+function isTokenFresh(timestamp) {
+  if (isNaN(timestamp)) return false;
+  const age = Date.now() - timestamp;
+  return age <= MAX_TOKEN_AGE_MS && age >= -60000;
+}
 
-    // 1. PIN equality check
-    if (pin !== String(config.pin)) return false;
-
-    // 2. Token expiration check (max 24h, allow 1 minute future clock skew)
-    const age = Date.now() - timestamp;
-    if (isNaN(timestamp) || age > MAX_TOKEN_AGE_MS || age < -60000) {
-      return false;
-    }
-
-    // 3. Timing-safe HMAC verification
-    const expectedHmac = crypto.createHmac('sha256', SERVER_SECRET).update(`${pin}:${timestamp}`).digest('hex');
-    const expectedBuf = Buffer.from(expectedHmac, 'utf8');
-    const actualBuf = Buffer.from(hmac, 'utf8');
-
+// Comprobación criptográfica de tiempo constante.
+// Previene ataques de timing donde miden microsegundos para adivinar el HMAC caracter por caracter.
+function verifyHmac(pin, timestamp, actualHmac) {
+  try {
+    const expected = crypto.createHmac('sha256', SERVER_SECRET).update(`${pin}:${timestamp}`).digest('hex');
+    const expectedBuf = Buffer.from(expected, 'utf8');
+    const actualBuf = Buffer.from(actualHmac, 'utf8');
     if (expectedBuf.length !== actualBuf.length) return false;
     return crypto.timingSafeEqual(expectedBuf, actualBuf);
   } catch (_) {
@@ -146,24 +109,17 @@ function validateToken(token) {
   }
 }
 
-/**
- * Persists updated configuration back to pocket.config.json.
- * @param {object} updates
- * @returns {object} Updated config
- */
-function saveConfig(updates) {
-  const current = loadConfig();
-  const next = { ...current, ...updates };
-  // Never save empty strings for PIN
-  if (updates.pin !== undefined) {
-    next.pin = String(updates.pin).trim();
-  }
-  if (updates.port !== undefined) {
-    const p = parseInt(updates.port, 10);
-    if (!isNaN(p) && p > 0 && p < 65536) next.port = p;
-  }
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
-  return next;
+function validateToken(token) {
+  const config = loadConfig();
+  if (!config.pin) return true;
+  if (!token) return false;
+
+  const parsed = parseToken(token);
+  if (!parsed) return false;
+  if (parsed.pin !== String(config.pin)) return false;
+  if (!isTokenFresh(parsed.timestamp)) return false;
+
+  return verifyHmac(parsed.pin, parsed.timestamp, parsed.hmac);
 }
 
 module.exports = {
@@ -176,6 +132,6 @@ module.exports = {
   isRateLimited,
   getRemainingLockoutSeconds,
   MAX_TOKEN_AGE_MS,
-  MAX_FAILED_ATTEMPTS
+  MAX_FAILED_ATTEMPTS,
+  SERVER_SECRET
 };
-

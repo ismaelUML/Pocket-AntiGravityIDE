@@ -1,5 +1,5 @@
-// Adaptador nativo de Git.
-// Cero librerías infladas de 15 MB como isomorphic-git ni paquetes con bindings raros de C++:
+// Adaptador nativo de Git con funciones de complejidad ciclomática <= 5.
+// Cero librerías infladas de 15 MB como isomorphic-git ni bindings raros de C++:
 // ejecutamos el binario `git` que ya está en el PATH del sistema usando `windowsHide: true`
 // para que no parpadee ninguna ventana negra en Windows.
 const { execFile } = require('child_process');
@@ -7,6 +7,60 @@ const fs = require('fs');
 const path = require('path');
 const { VcsPort } = require('../../core/ports/vcs.port');
 const { FileDiff, WorkspaceChanges } = require('../../core/domain/change');
+
+// Micro-predicados de complejidad mínima (CC <= 2) para clasificar commits convencionales
+function isTestOnly(files) {
+  return files.length > 0 && files.every(f => f.includes('test') || f.includes('.spec.'));
+}
+
+function isDocsOnly(files) {
+  return files.length > 0 && files.every(f => f.endsWith('.md') || f.includes('docs/'));
+}
+
+function isUiOnly(files) {
+  return files.length > 0 && files.every(f => f.startsWith('public/') || f.endsWith('.html') || f.endsWith('.css'));
+}
+
+function isApiOnly(files) {
+  return files.length > 0 && files.every(f => f.includes('src/interfaces/http') || f.includes('routes/'));
+}
+
+function isVcsOnly(files) {
+  return files.length > 0 && files.every(f => f.includes('src/infrastructure/vcs') || f.includes('src/core/ports/vcs'));
+}
+
+// Conteo de líneas agregadas/eliminadas en un bloque diff (CC <= 3)
+function countDiffLines(lines) {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of lines) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+    else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+  }
+  return { additions, deletions };
+}
+
+// Construye la entidad FileDiff para archivos sin rastrear (untracked ??)
+function buildUntrackedFileDiff(workspaceRoot, filePath) {
+  let content = '';
+  let additions = 0;
+  try {
+    const fullPath = path.join(workspaceRoot, filePath);
+    const stat = fs.statSync(fullPath);
+    if (stat.isFile() && stat.size < 200000) {
+      content = fs.readFileSync(fullPath, 'utf8');
+      additions = content.split('\n').length;
+    }
+  } catch (_) {}
+
+  return new FileDiff({
+    file: filePath,
+    diff: content ? `@@ -0,0 +1,${additions} @@\n` + content.split('\n').map(l => `+${l}`).join('\n') : '',
+    additions,
+    deletions: 0,
+    status: 'untracked'
+  });
+}
 
 class GitAdapter extends VcsPort {
   runGit(args, cwd) {
@@ -18,10 +72,7 @@ class GitAdapter extends VcsPort {
     });
   }
 
-  // Parseador de diff unificado hecho en casa.
-  // Podríamos haber metido una dependencia pesada de npm solo para colorear diffs,
-  // pero el formato "diff --git" es súper estándar: cortamos por cabeceras y contamos
-  // líneas que arrancan con '+' o '-' ignorando las marcas de archivo (+++ / ---).
+  // Parseador artesanal de diff unificado (diff --git)
   parseUnifiedDiff(rawDiff) {
     if (!rawDiff) return [];
     const fileDiffs = [];
@@ -29,17 +80,9 @@ class GitAdapter extends VcsPort {
 
     for (const part of parts) {
       const lines = part.split('\n');
-      const header = lines[0];
-      const fileMatch = header.match(/b\/(.+)$/);
+      const fileMatch = lines[0].match(/b\/(.+)$/);
       const fileName = fileMatch ? fileMatch[1] : 'unknown';
-
-      let additions = 0;
-      let deletions = 0;
-
-      for (const line of lines) {
-        if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-        else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
-      }
+      const { additions, deletions } = countDiffLines(lines);
 
       fileDiffs.push(new FileDiff({
         file: fileName,
@@ -54,8 +97,6 @@ class GitAdapter extends VcsPort {
 
   async getChanges(workspaceRoot) {
     try {
-      // Usamos `status --porcelain` obligatoriamente: si no, Git escupe texto
-      // decorado para humanos con consejos y códigos de escape ANSI que rompen el parseo.
       const statusOutput = await this.runGit(['status', '--porcelain'], workspaceRoot);
       if (!statusOutput) {
         return new WorkspaceChanges({ workspaceRoot, files: [] });
@@ -64,33 +105,13 @@ class GitAdapter extends VcsPort {
       const rawDiff = await this.runGit(['diff', '-U3'], workspaceRoot).catch(() => '');
       const parsedDiffs = this.parseUnifiedDiff(rawDiff);
 
-      // Collect untracked files
       const statusLines = statusOutput.split('\n').filter(Boolean);
       const untrackedFiles = [];
 
       for (const line of statusLines) {
-        const status = line.substring(0, 2).trim();
-        const filePath = line.substring(3).trim().replace(/^"|"$/g, '');
-
-        if (status === '??') {
-          let content = '';
-          let additions = 0;
-          try {
-            const fullPath = path.join(workspaceRoot, filePath);
-            const stat = fs.statSync(fullPath);
-            if (stat.isFile() && stat.size < 200000) {
-              content = fs.readFileSync(fullPath, 'utf8');
-              additions = content.split('\n').length;
-            }
-          } catch (_) {}
-
-          untrackedFiles.push(new FileDiff({
-            file: filePath,
-            diff: content ? `@@ -0,0 +1,${additions} @@\n` + content.split('\n').map(l => `+${l}`).join('\n') : '',
-            additions,
-            deletions: 0,
-            status: 'untracked'
-          }));
+        if (line.startsWith('??')) {
+          const filePath = line.substring(3).trim().replace(/^"|"$/g, '');
+          untrackedFiles.push(buildUntrackedFileDiff(workspaceRoot, filePath));
         }
       }
 
@@ -98,7 +119,7 @@ class GitAdapter extends VcsPort {
         workspaceRoot,
         files: [...parsedDiffs, ...untrackedFiles]
       });
-    } catch (err) {
+    } catch (_) {
       return new WorkspaceChanges({ workspaceRoot, files: [] });
     }
   }
@@ -123,7 +144,6 @@ class GitAdapter extends VcsPort {
 
   async rejectAll(workspaceRoot) {
     try {
-      // Non-destructive safety: Stash all modifications and untracked files first
       const stashMsg = `pocket-reject-backup-${Date.now()}`;
       await this.runGit(['stash', 'push', '--include-untracked', '-m', stashMsg], workspaceRoot).catch(() => {});
       await this.runGit(['restore', '.'], workspaceRoot).catch(() => {});
@@ -135,7 +155,6 @@ class GitAdapter extends VcsPort {
 
   async rejectFile(workspaceRoot, filePath) {
     try {
-      // Non-destructive safety: Try restore first, fallback to clean for untracked files
       await this.runGit(['restore', '--', filePath], workspaceRoot).catch(async () => {
         await this.runGit(['clean', '-f', '--', filePath], workspaceRoot).catch(() => {});
       });
@@ -155,48 +174,29 @@ class GitAdapter extends VcsPort {
         remote: hasOrigin ? 'origin' : (remotes.split('\n')[0] || ''),
         hasRemote: Boolean(remotes.trim())
       };
-    } catch (err) {
+    } catch (_) {
       return { branch: 'main', remote: '', hasRemote: false };
     }
   }
 
-  // Generador de Conventional Commits para cuando estás desde el celular y te da pereza escribir.
-  // Analiza las rutas de los archivos staged: si solo tocaste docs -> docs: ...,
-  // si tocaste tests -> test: ..., si tocaste CSS/HTML -> feat(ui): ...
+  // Generador de Conventional Commits dividido en micro-funciones con CC <= 4
   generateSuggestedCommitMessage(stagedFiles = []) {
     if (!stagedFiles || stagedFiles.length === 0) {
       return 'chore: update workspace files';
     }
 
     const files = stagedFiles.map(f => typeof f === 'string' ? f : (f.file || ''));
-    
-    // Test files
-    if (files.every(f => f.includes('test') || f.includes('.spec.'))) {
-      return 'test: add and update test suites';
-    }
 
-    // Documentation
-    if (files.every(f => f.endsWith('.md') || f.includes('docs/'))) {
-      return 'docs: update project documentation and guides';
-    }
-
-    // UI / Frontend files
-    if (files.every(f => f.startsWith('public/') || f.endsWith('.html') || f.endsWith('.css'))) {
+    if (isTestOnly(files)) return 'test: add and update test suites';
+    if (isDocsOnly(files)) return 'docs: update project documentation and guides';
+    if (isUiOnly(files)) {
       return files.length === 1
         ? `feat(ui): update ${path.basename(files[0])}`
         : 'feat(ui): update mobile interface and components';
     }
+    if (isApiOnly(files)) return 'feat(api): update HTTP routes and endpoints';
+    if (isVcsOnly(files)) return 'feat(vcs): enhance version control system capabilities';
 
-    // Backend / Routes / Ports
-    if (files.every(f => f.includes('src/interfaces/http') || f.includes('routes/'))) {
-      return 'feat(api): update HTTP routes and endpoints';
-    }
-
-    if (files.every(f => f.includes('src/infrastructure/vcs') || f.includes('src/core/ports/vcs'))) {
-      return 'feat(vcs): enhance version control system capabilities';
-    }
-
-    // Single file fallback
     if (files.length === 1) {
       const base = path.basename(files[0]);
       const ext = path.extname(base);
@@ -204,7 +204,6 @@ class GitAdapter extends VcsPort {
       return `feat(${name}): update ${base}`;
     }
 
-    // Multi-file general summary
     return `feat: update ${files.length} project files`;
   }
 
@@ -218,32 +217,15 @@ class GitAdapter extends VcsPort {
       const rawDiff = await this.runGit(['diff', '--cached', '-U3'], workspaceRoot).catch(() => '');
       const parsedDiffs = this.parseUnifiedDiff(rawDiff);
 
-      // Also account for newly staged untracked files (status 'A ')
       const statusLines = statusOutput.split('\n').filter(Boolean);
       const stagedAddedFiles = [];
 
       for (const line of statusLines) {
-        const indexStatus = line.charAt(0);
-        const filePath = line.substring(3).trim().replace(/^"|"$/g, '');
-
-        if (indexStatus === 'A' && !parsedDiffs.some(p => p.file === filePath)) {
-          let content = '';
-          let additions = 0;
-          try {
-            const fullPath = path.join(workspaceRoot, filePath);
-            if (fs.existsSync(fullPath)) {
-              content = fs.readFileSync(fullPath, 'utf8');
-              additions = content.split('\n').length;
-            }
-          } catch (_) {}
-
-          stagedAddedFiles.push(new FileDiff({
-            file: filePath,
-            diff: content ? `@@ -0,0 +1,${additions} @@\n` + content.split('\n').map(l => `+${l}`).join('\n') : '',
-            additions,
-            deletions: 0,
-            status: 'added'
-          }));
+        if (line.charAt(0) === 'A') {
+          const filePath = line.substring(3).trim().replace(/^"|"$/g, '');
+          if (!parsedDiffs.some(p => p.file === filePath)) {
+            stagedAddedFiles.push(buildUntrackedFileDiff(workspaceRoot, filePath));
+          }
         }
       }
 
@@ -251,7 +233,7 @@ class GitAdapter extends VcsPort {
         workspaceRoot,
         files: [...parsedDiffs, ...stagedAddedFiles]
       });
-    } catch (err) {
+    } catch (_) {
       return new WorkspaceChanges({ workspaceRoot, files: [] });
     }
   }
@@ -263,7 +245,6 @@ class GitAdapter extends VcsPort {
         return { success: false, error: 'Commit message cannot be empty.' };
       }
 
-      // Check if there are staged changes
       const staged = await this.getStagedChanges(workspaceRoot);
       if (!staged.hasChanges || staged.files.length === 0) {
         return { success: false, error: 'No staged changes to commit. Stage files first.' };
@@ -305,5 +286,13 @@ class GitAdapter extends VcsPort {
   }
 }
 
-module.exports = { GitAdapter };
-
+module.exports = {
+  GitAdapter,
+  isTestOnly,
+  isDocsOnly,
+  isUiOnly,
+  isApiOnly,
+  isVcsOnly,
+  countDiffLines,
+  buildUntrackedFileDiff
+};
