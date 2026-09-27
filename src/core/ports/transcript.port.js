@@ -1,5 +1,5 @@
 /**
- * Port (Interface) for Brain transcript logging and session persistence.
+ * Port (Interface) for Brain transcript logging, session persistence, and artifact reading.
  */
 class TranscriptPort {
   listSessions() {
@@ -11,6 +11,10 @@ class TranscriptPort {
   }
 
   watchSession(conversationId, onStep) {
+    throw new Error('Method not implemented.');
+  }
+
+  readArtifact(conversationId, rawPath, workspaceRoot) {
     throw new Error('Method not implemented.');
   }
 }

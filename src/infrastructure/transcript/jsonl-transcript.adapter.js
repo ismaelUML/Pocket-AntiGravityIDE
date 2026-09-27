@@ -1,6 +1,7 @@
 const { TranscriptPort } = require('../../core/ports/transcript.port');
 const { Session } = require('../../core/domain/session');
 const { listSessions, readTranscript, DEFAULT_BRAIN_DIR } = require('./reader');
+const { resolveArtifact } = require('./artifact-resolver');
 const TranscriptWatcher = require('./watcher');
 
 class JsonlTranscriptAdapter extends TranscriptPort {
@@ -34,6 +35,10 @@ class JsonlTranscriptAdapter extends TranscriptPort {
       });
     }
     this.watcher.start(conversationId);
+  }
+
+  readArtifact(conversationId, rawPath, workspaceRoot) {
+    return resolveArtifact(conversationId, rawPath, workspaceRoot);
   }
 }
 

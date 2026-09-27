@@ -1,27 +1,29 @@
-const fs = require('fs');
-const path = require('path');
+// Caso de uso: Gestión de Personas y Roles de IA.
+// Cero fs, cero path, cero llamadas directas al disco acá:
+// todo se hace pasando por el puerto de configuración inyectado (ConfigPort).
+// Así el caso de uso es 100% testeable en memoria sin tocar un solo archivo real.
 const { Persona, BUILT_IN_PERSONAS } = require('../domain/persona');
 
-const CONFIG_PATH = path.join(__dirname, '..', '..', '..', 'pocket.config.json');
-
-/**
- * Use case: Manages assistant personas, custom role prompts, and persona resolution.
- */
 class ManagePersonasUseCase {
-  constructor() {
+  constructor(configPort = null) {
+    this.configPort = configPort;
     this.customPersonas = this.loadCustomPersonas();
   }
 
   loadCustomPersonas() {
+    if (!this.configPort || typeof this.configPort.loadConfig !== 'function') {
+      return [];
+    }
+
     try {
-      if (fs.existsSync(CONFIG_PATH)) {
-        const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed.personas)) {
-          return parsed.personas.map(p => new Persona(p));
-        }
+      const config = this.configPort.loadConfig();
+      if (Array.isArray(config && config.personas)) {
+        return config.personas.map(p => new Persona(p));
       }
-    } catch (_) {}
+    } catch (_) {
+      // Si la carga falla por cualquier rareza en el puerto, no volteamos la app;
+      // arrancamos limpios con las personas built-in de fábrica.
+    }
     return [];
   }
 
@@ -43,22 +45,21 @@ class ManagePersonasUseCase {
     const newPersona = new Persona({
       id,
       name: name.trim(),
-      icon: icon.trim() || '🤖',
-      description: description.trim(),
-      systemPromptPrefix: systemPromptPrefix.trim(),
+      icon: (icon && icon.trim()) || '🤖',
+      description: (description && description.trim()) || '',
+      systemPromptPrefix: (systemPromptPrefix && systemPromptPrefix.trim()) || '',
       slashCommand: slashCommand ? slashCommand.trim() : null
     });
 
     this.customPersonas.push(newPersona);
 
+    if (!this.configPort || typeof this.configPort.saveConfig !== 'function') {
+      return { success: true, persona: newPersona, persisted: false };
+    }
+
     try {
-      let config = {};
-      if (fs.existsSync(CONFIG_PATH)) {
-        config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      }
-      config.personas = this.customPersonas;
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
-      return { success: true, persona: newPersona };
+      this.configPort.saveConfig({ personas: this.customPersonas });
+      return { success: true, persona: newPersona, persisted: true };
     } catch (err) {
       return { success: false, error: err.message };
     }

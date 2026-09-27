@@ -1,6 +1,5 @@
-/**
- * Use case: Manages conversation sessions, reads transcripts, and creates new chats.
- */
+// Caso de uso: Gestión de sesiones de chat, lectura de transcripts y resolución de artefactos.
+// Desacoplado: delega toda la persistencia al puerto TranscriptPort y la automatización a IdeAutomationPort.
 class ManageSessionsUseCase {
   constructor({ transcriptPort, ideAutomationPort }) {
     this.transcript = transcriptPort;
@@ -17,6 +16,10 @@ class ManageSessionsUseCase {
 
   watchSession(conversationId, onStep) {
     this.transcript.watchSession(conversationId, onStep);
+  }
+
+  readArtifact(conversationId, rawPath, workspaceRoot) {
+    return this.transcript.readArtifact(conversationId, rawPath, workspaceRoot);
   }
 
   async startNewSession() {
