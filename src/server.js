@@ -11,11 +11,14 @@ const { ManageSessionsUseCase } = require('./core/usecases/manage-sessions.useca
 const { ManagePersonasUseCase } = require('./core/usecases/manage-personas.usecase');
 
 // Outbound Infrastructure Adapters
+const { JsonConfigAdapter } = require('./infrastructure/config/json-config.adapter');
 const { Win32AutomationAdapter } = require('./infrastructure/automation/win32-automation.adapter');
 const { GitAdapter } = require('./infrastructure/vcs/git.adapter');
 const { JsonlTranscriptAdapter, DEFAULT_BRAIN_DIR } = require('./infrastructure/transcript/jsonl-transcript.adapter');
 const { SystemDoctor } = require('./infrastructure/system/doctor');
 const { TunnelManager } = require('./infrastructure/system/tunnel-manager');
+const { MemoryEvictionGuard } = require('./infrastructure/resilience/memory-eviction');
+const { createCorsMiddleware } = require('./infrastructure/security/origin-guard');
 const { getLogoBanner, box, COLORS, rgb, BOLD, RESET, DIM } = require('./infrastructure/terminal/theme');
 
 // Inbound Primary Interfaces
@@ -34,16 +37,18 @@ const { getActiveWorkspaceRoot } = require('./infrastructure/workspace/resolver'
 // ----------------------------------------------------
 // 1. Composition Root (El cableado de dependencias)
 // Acá se enchufa todo: instanciamos los adaptadores que tocan fierros del SO
-// (Win32, Git CLI, logs de disco) y se los inyectamos a los Casos de Uso del core.
+// (Win32, Git CLI, logs de disco, config) y se los inyectamos a los Casos de Uso del core.
 // Ningún endpoint HTTP toca el sistema operativo de forma directa; todo pasa por este desacoplamiento.
 // ----------------------------------------------------
+const jsonConfigAdapter = new JsonConfigAdapter();
 const ideAutomationAdapter = new Win32AutomationAdapter();
 const vcsAdapter = new GitAdapter();
 const transcriptAdapter = new JsonlTranscriptAdapter(DEFAULT_BRAIN_DIR);
 const systemDoctor = new SystemDoctor();
 const tunnelManager = new TunnelManager();
+const memoryGuard = new MemoryEvictionGuard({ maxItems: 100, heapThresholdMb: 250 });
 
-const managePersonasUseCase = new ManagePersonasUseCase();
+const managePersonasUseCase = new ManagePersonasUseCase(jsonConfigAdapter);
 const sendPromptUseCase = new SendPromptUseCase(ideAutomationAdapter, managePersonasUseCase);
 const reviewChangesUseCase = new ReviewChangesUseCase({
   vcsPort: vcsAdapter,
@@ -54,7 +59,7 @@ const manageSessionsUseCase = new ManageSessionsUseCase({
   ideAutomationPort: ideAutomationAdapter
 });
 
-// Active Session State
+// Active Session State & Retention Guard
 let activeConversationId = null;
 const initialSessions = manageSessionsUseCase.listSessions();
 const knownSessionIds = new Set(initialSessions.map((s) => s.id));
@@ -67,6 +72,12 @@ if (initialSessions.length > 0) {
 // ----------------------------------------------------
 const app = express();
 const server = http.createServer(app);
+
+const config = loadConfig();
+const PORT = process.env.PORT || config.port || 3000;
+
+// Restricción Quirúrgica de Orígenes (CORS estricto)
+app.use(createCorsMiddleware({ tunnelManager, activePort: PORT }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -84,12 +95,13 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// WebSocket Handler
+// WebSocket Handler con Origin Guard
 const wsHandler = new WebSocketServerHandler({
   server,
   reviewChangesUseCase,
   ideAutomationPort: ideAutomationAdapter,
-  getActiveSessionId: () => activeConversationId
+  getActiveSessionId: () => activeConversationId,
+  tunnelManager
 });
 
 // Transcript Watcher Hook
@@ -108,7 +120,7 @@ function startSessionWatcher(sessionId) {
 }
 if (activeConversationId) startSessionWatcher(activeConversationId);
 
-// Auto-detect genuinely brand-new sessions created on disk
+// Auto-detect genuinely brand-new sessions created on disk con política de desalojo
 setInterval(() => {
   const sessions = manageSessionsUseCase.listSessions();
   const currentIds = new Set(sessions.map((s) => s.id));
@@ -119,6 +131,9 @@ setInterval(() => {
       knownSessionIds.delete(id);
     }
   }
+
+  // Desalojo defensivo de memoria si el historial de IDs crece demasiado
+  memoryGuard.evictOldest(knownSessionIds, 100);
 
   // Find if there is a session on disk that was NOT known previously
   const brandNewSession = sessions.find((s) => !knownSessionIds.has(s.id));
@@ -143,7 +158,9 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     architecture: 'hexagonal',
     activeConversationId,
-    pendingPromptsInQueue: ideAutomationAdapter.getPendingQueueCount()
+    pendingPromptsInQueue: ideAutomationAdapter.getPendingQueueCount(),
+    memory: memoryGuard.getMemoryStats(),
+    tunnel: tunnelManager.getStatus()
   });
 });
 
@@ -184,16 +201,11 @@ app.get('/dashboard', (req, res) => {
 
 // ----------------------------------------------------
 // 4. Arranque del Servidor
-// Levantamos Express + WebSockets y mostramos la URL de LAN calculada por el Doctor.
-// Si el usuario configuró "preventSleep", activamos la trampa de energía de Windows
-// para que la laptop no se suspenda a mitad de una tarea larga mientras estamos en el sillón.
 // ----------------------------------------------------
-const config = loadConfig();
 if (config.preventSleep) {
   systemDoctor.setKeepAwake(true);
 }
 
-const PORT = process.env.PORT || config.port || 3000;
 server.listen(PORT, () => {
   const root = getActiveWorkspaceRoot();
   const netInfo = systemDoctor.getNetworkInfo(PORT);
@@ -207,5 +219,5 @@ server.listen(PORT, () => {
     `🔒 ${BOLD}Security PIN:${RESET}      ${config.pin ? rgb(COLORS.neonGreen[0], COLORS.neonGreen[1], COLORS.neonGreen[2], 'ENABLED (Protected)') : rgb(COLORS.yellow[0], COLORS.yellow[1], COLORS.yellow[2], 'DISABLED')}`,
     `📁 ${BOLD}Workspace:${RESET}         ${DIM}${root}${RESET}`,
     `🧠 ${BOLD}Brain Logs:${RESET}        ${DIM}${DEFAULT_BRAIN_DIR}${RESET}`
-  ], { title: `POCKET ANTIGRAVITY v1.6.0 [PORT ${PORT}]`, borderColor: COLORS.blurple }) + '\n');
+  ], { title: `POCKET ANTIGRAVITY v1.7.0 [PORT ${PORT}]`, borderColor: COLORS.blurple }) + '\n');
 });
