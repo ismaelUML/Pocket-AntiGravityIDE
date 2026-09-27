@@ -1,0 +1,41 @@
+name: SonarCloud Static Analysis & Quality Gate
+
+on:
+  push:
+    branches: [ main, master, 'feat/**', 'fix/**' ]
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+
+permissions:
+  pull-requests: read
+  contents: read
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code (Full history required for blame/diff analysis)
+        uses: actions/checkout@v4
+        with:
+          # Desactivamos clones superficiales: SonarCloud necesita ver el historial
+          # de commits para calcular métricas de autores y líneas nuevas modificadas.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Execute Local Unit Tests
+        run: npm test
+
+      - name: SonarCloud Scan & Security Audit
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
