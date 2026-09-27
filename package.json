@@ -32,7 +32,8 @@
     "stop": "bin\\stop.bat",
     "dashboard": "bin\\dashboard.bat",
     "tunnel": "node bin/start-tunnel.js",
-    "test": "node --test tests/**/*.test.js"
+    "test": "node --test tests/**/*.test.js",
+    "audit": "node bin/check-complexity.js && npm test"
   },
   "dependencies": {
     "chokidar": "^3.6.0",
