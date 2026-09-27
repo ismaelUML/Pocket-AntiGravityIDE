@@ -54,14 +54,14 @@ class ReviewChangesUseCase {
     return 'feat: update staged files';
   }
 
-  async commitChanges(workspaceRoot, { message, push = false, remote = 'origin', branch } = {}) {
+  async commitChanges(workspaceRoot, { message, push = false } = {}) {
     const commitResult = await this.vcs.commit(workspaceRoot, message);
     if (!commitResult.success) {
       return commitResult;
     }
 
     if (push) {
-      const pushResult = await this.vcs.push(workspaceRoot, remote, branch);
+      const pushResult = await this.vcs.push(workspaceRoot, 'origin');
       return {
         ...commitResult,
         pushed: pushResult.success,

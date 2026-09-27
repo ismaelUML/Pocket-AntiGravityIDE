@@ -57,25 +57,16 @@ async function handleStagedChanges(reviewChangesUseCase, req, res) {
 async function handleCommitChanges(reviewChangesUseCase, onChangesBroadcast, req, res) {
   try {
     const root = getActiveWorkspaceRoot();
-    const { message, push = true, remote, branch } = req.body || {};
+    const { message, push = true } = req.body || {};
 
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ success: false, error: 'Commit message is required.' });
     }
 
-    const safeMessage = message.trim().replace(/^[-]+/, '');
-    if (!safeMessage) {
-      return res.status(400).json({ success: false, error: 'Invalid commit message.' });
-    }
-
-    const safeRemote = remote && typeof remote === 'string' ? remote.trim().replace(/^[-]+/, '') : undefined;
-    const safeBranch = branch && typeof branch === 'string' ? branch.trim().replace(/^[-]+/, '') : undefined;
-
+    const safeMessage = message.trim();
     const result = await reviewChangesUseCase.commitChanges(root, {
       message: safeMessage,
-      push: Boolean(push),
-      remote: safeRemote,
-      branch: safeBranch
+      push: Boolean(push)
     });
 
     if (typeof onChangesBroadcast === 'function') onChangesBroadcast();

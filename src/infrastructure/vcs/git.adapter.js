@@ -291,11 +291,11 @@ class GitAdapter extends VcsPort {
     }
   }
 
-  async push(workspaceRoot, remote = 'origin', branch) {
+  async push(workspaceRoot, remote = 'origin') {
     try {
       const branchInfo = await this.getBranchInfo(workspaceRoot);
-      const safeBranch = String(branch || branchInfo.branch || 'main').trim().replace(/[^a-zA-Z0-9_\-\/]/g, '');
-      const safeRemote = String(remote || branchInfo.remote || 'origin').trim().replace(/[^a-zA-Z0-9_\-]/g, '');
+      const safeBranch = branchInfo.branch || 'main';
+      const safeRemote = branchInfo.remote || remote || 'origin';
 
       const stdout = await this.runGit(['push', '--', safeRemote, safeBranch], workspaceRoot);
       return {
