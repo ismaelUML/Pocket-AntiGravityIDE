@@ -95,4 +95,85 @@ test('Changes Routes: Staged Diff & Mobile Commit Endpoints', async (t) => {
     assert.strictEqual(data.pushed, true);
     assert.strictEqual(broadcastCalled, true);
   });
+
+  await t.test('GET /api/changes returns workspace changes', async () => {
+    const res = await fetch(`${baseUrl}/api/changes`, {
+      headers: { 'Authorization': `Bearer ${validToken}` }
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.hasChanges, false);
+  });
+
+  await t.test('POST /api/changes/accept validates file param and accepts all or file', async () => {
+    // Malformed file (starts with dash)
+    const malformedRes = await fetch(`${baseUrl}/api/changes/accept`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${validToken}`
+      },
+      body: JSON.stringify({ file: '-invalid-arg' })
+    });
+    assert.strictEqual(malformedRes.status, 400);
+
+    // Accept single file
+    const fileRes = await fetch(`${baseUrl}/api/changes/accept`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${validToken}`
+      },
+      body: JSON.stringify({ file: 'src/app.js' })
+    });
+    assert.strictEqual(fileRes.status, 200);
+    const fileData = await fileRes.json();
+    assert.strictEqual(fileData.file, 'src/app.js');
+
+    // Accept all
+    const allRes = await fetch(`${baseUrl}/api/changes/accept`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${validToken}`
+      },
+      body: JSON.stringify({})
+    });
+    assert.strictEqual(allRes.status, 200);
+  });
+
+  await t.test('POST /api/changes/reject validates file param and rejects all or file', async () => {
+    // Malformed file
+    const malformedRes = await fetch(`${baseUrl}/api/changes/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${validToken}`
+      },
+      body: JSON.stringify({ file: 'bad file name with spaces and *' })
+    });
+    assert.strictEqual(malformedRes.status, 400);
+
+    // Reject single file
+    const fileRes = await fetch(`${baseUrl}/api/changes/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${validToken}`
+      },
+      body: JSON.stringify({ file: 'src/app.js' })
+    });
+    assert.strictEqual(fileRes.status, 200);
+
+    // Reject all
+    const allRes = await fetch(`${baseUrl}/api/changes/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${validToken}`
+      },
+      body: JSON.stringify({})
+    });
+    assert.strictEqual(allRes.status, 200);
+  });
 });
