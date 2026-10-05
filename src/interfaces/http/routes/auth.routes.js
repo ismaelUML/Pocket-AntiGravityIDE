@@ -1,66 +1,34 @@
+// Rutas de autenticación y verificación de PIN de acceso.
 const express = require('express');
 const {
   loadConfig,
-  generateToken,
   isRateLimited,
-  recordFailedAttempt,
-  resetFailedAttempts,
-  getRemainingLockoutSeconds,
-  MAX_FAILED_ATTEMPTS
+  getRemainingLockoutSeconds
 } = require('../../../infrastructure/security/pin-auth');
+const { verifyPinAttempt } = require('./auth-verifier');
+
+function handleAuthStatus(req, res) {
+  const config = loadConfig();
+  res.json({
+    authRequired: Boolean(config.pin),
+    isRateLimited: isRateLimited(),
+    remainingLockoutSeconds: getRemainingLockoutSeconds()
+  });
+}
+
+function handleVerifyPin(req, res) {
+  return verifyPinAttempt(req.body, res);
+}
 
 function createAuthRoutes() {
   const router = express.Router();
-
-  router.get('/status', (req, res) => {
-    const config = loadConfig();
-    res.json({
-      authRequired: Boolean(config.pin),
-      isRateLimited: isRateLimited(),
-      remainingLockoutSeconds: getRemainingLockoutSeconds()
-    });
-  });
-
-  router.post('/verify', (req, res) => {
-    if (isRateLimited()) {
-      const remaining = getRemainingLockoutSeconds();
-      return res.status(429).json({
-        success: false,
-        isLocked: true,
-        error: `Too many failed attempts. Try again in ${remaining} seconds.`
-      });
-    }
-
-    const config = loadConfig();
-    const inputPin = String(req.body.pin || '').trim();
-
-    if (!config.pin || inputPin === String(config.pin)) {
-      resetFailedAttempts();
-      const token = generateToken(config.pin || 'OPEN');
-      return res.json({
-        success: true,
-        token
-      });
-    }
-
-    const attempt = recordFailedAttempt();
-    if (attempt.isLocked) {
-      return res.status(429).json({
-        success: false,
-        isLocked: true,
-        error: `Too many failed attempts. Locked for ${attempt.remainingSeconds} seconds.`
-      });
-    }
-
-    return res.status(401).json({
-      success: false,
-      isLocked: false,
-      remainingAttempts: MAX_FAILED_ATTEMPTS - attempt.failedAttempts,
-      error: `Incorrect PIN. Access denied (${MAX_FAILED_ATTEMPTS - attempt.failedAttempts} attempts left).`
-    });
-  });
-
+  router.get('/status', handleAuthStatus);
+  router.post('/verify', handleVerifyPin);
   return router;
 }
 
-module.exports = { createAuthRoutes };
+module.exports = {
+  createAuthRoutes,
+  handleAuthStatus,
+  handleVerifyPin
+};

@@ -34,7 +34,8 @@
     "tunnel": "node bin/start-tunnel.js",
     "test": "node --test",
     "test:coverage": "node -e \"require('fs').mkdirSync('coverage', {recursive: true}); const { spawnSync } = require('child_process'); const res = spawnSync(process.execPath, ['--test', '--experimental-test-coverage', '--test-reporter=lcov', '--test-reporter-destination=coverage/lcov.info', '--test-reporter=spec', '--test-reporter-destination=stdout'], { stdio: 'inherit' }); process.exit(res.status);\"",
-    "audit": "node bin/check-complexity.js && node --test"
+    "audit": "node bin/check-complexity.js && node --test",
+    "metrics": "python tools/metricasV2/audit_project.py ."
   },
   "dependencies": {
     "chokidar": "^3.6.0",

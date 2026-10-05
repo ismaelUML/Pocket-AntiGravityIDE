@@ -1,13 +1,13 @@
 // Manejador del Servidor WebSocket para streaming reactivo en vivo.
-// Protegido con Surgical Origin Guard: rechaza intentos de conexión desde páginas
-// web maliciosas de terceros.
 const WebSocket = require('ws');
-const { loadConfig, validateToken } = require('../../infrastructure/security/pin-auth');
-const { isOriginAllowed } = require('../../infrastructure/security/origin-guard');
 const { getActiveWorkspaceRoot } = require('../../infrastructure/workspace/resolver');
+const { WebSocketServerPort } = require('./websocket.port');
+const { broadcastToClients } = require('./websocket-broadcaster');
+const { handleConnection, sendInitPayload } = require('./websocket-connection-manager');
 
-class WebSocketServerHandler {
+class WebSocketServerHandler extends WebSocketServerPort {
   constructor({ server, reviewChangesUseCase, ideAutomationPort, getActiveSessionId, tunnelManager }) {
+    super();
     this.wss = new WebSocket.Server({ server, path: '/ws' });
     this.reviewChanges = reviewChangesUseCase;
     this.ideAutomation = ideAutomationPort;
@@ -20,90 +20,26 @@ class WebSocketServerHandler {
   }
 
   init() {
-    this.wss.on('connection', async (ws, req) => {
-      // Bloqueo quirúrgico de orígenes cruzados en WebSocket
-      const origin = req.headers.origin;
-      if (!isOriginAllowed(origin, { tunnelManager: this.tunnelManager })) {
-        console.warn(`[WebSocket] Blocked unauthorized connection from origin: ${origin}`);
-        ws.close(1008, 'Origin unauthorized');
-        return;
-      }
-
-      const config = loadConfig();
-      const urlParams = new URLSearchParams((req.url.split('?')[1]) || '');
-      const token = urlParams.get('token');
-
-      if (!config.pin || validateToken(token)) {
-        ws.isAuthenticated = true;
-        await this._sendInitPayload(ws);
-      } else {
-        ws.isAuthenticated = false;
-        ws.send(JSON.stringify({
-          type: 'AUTH_REQUIRED',
-          error: 'Authentication required. Please enter your PIN.'
-        }));
-      }
-
-      ws.on('message', async (message) => {
-        await this._handleClientMessage(ws, message);
-      });
-
-      ws.on('close', () => {});
+    this.wss.on('connection', (ws, req) => {
+      handleConnection(this, ws, req);
     });
-
-    // Fallback suave periódico cada 30s solo si hay clientes conectados
-    setInterval(async () => {
-      if (this.wss.clients.size > 0) {
-        this.broadcastChanges();
-      }
+    setInterval(() => {
+      this._periodicRefresh();
     }, 30000);
   }
 
-  async _sendInitPayload(ws) {
-    const changes = await this.reviewChanges.getChanges(getActiveWorkspaceRoot());
-    ws.send(JSON.stringify({
-      type: 'INIT',
-      activeConversationId: this.getActiveSessionId(),
-      chatState: this.currentChatState,
-      changes
-    }));
-  }
-
-  async _handleClientMessage(ws, message) {
-    try {
-      const data = JSON.parse(message);
-      if (data.type === 'AUTH') {
-        await this._handleAuthMessage(ws, data.token);
-      } else if (data.type === 'REFRESH_CHANGES' && ws.isAuthenticated) {
-        const changes = await this.reviewChanges.getChanges(getActiveWorkspaceRoot());
-        ws.send(JSON.stringify({ type: 'CHANGES_UPDATED', changes }));
-      } else if (data.type === 'CHECK_CHAT_STATE' && ws.isAuthenticated) {
-        const state = await this.ideAutomation.getChatState();
-        this.currentChatState = state;
-        ws.send(JSON.stringify({ type: 'CHAT_STATE_UPDATE', state }));
-      }
-    } catch (_) {}
-  }
-
-  async _handleAuthMessage(ws, token) {
-    if (validateToken(token)) {
-      ws.isAuthenticated = true;
-      await this._sendInitPayload(ws);
-    } else {
-      ws.send(JSON.stringify({
-        type: 'AUTH_FAILED',
-        error: 'Invalid or expired token.'
-      }));
+  _periodicRefresh() {
+    if (this.wss.clients.size > 0) {
+      this.broadcastChanges();
     }
   }
 
+  async sendInitPayload(ws) {
+    return sendInitPayload(this, ws);
+  }
+
   broadcast(payload) {
-    const raw = typeof payload === 'string' ? payload : JSON.stringify(payload);
-    this.wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN && client.isAuthenticated) {
-        client.send(raw);
-      }
-    });
+    broadcastToClients(this.wss.clients, payload);
   }
 
   async broadcastChanges() {
@@ -117,7 +53,7 @@ class WebSocketServerHandler {
   }
 
   getClientCount() {
-    return this.wss && this.wss.clients ? this.wss.clients.size : 0;
+    return this.wss.clients.size;
   }
 }
 

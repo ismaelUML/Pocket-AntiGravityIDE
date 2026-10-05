@@ -1,23 +1,31 @@
+// Middleware Express para autenticación por PIN en rutas HTTP protegidas.
 const { loadConfig, validateToken } = require('../../../infrastructure/security/pin-auth');
 
-/**
- * Express middleware to enforce PIN authentication on protected HTTP routes.
- */
+function _extractRawAuth(req) {
+  const hAuth = req.headers?.authorization;
+  if (hAuth) return hAuth;
+
+  const hPocket = req.headers?.['x-pocket-token'];
+  if (hPocket) return hPocket;
+
+  return req.query?.token;
+}
+
+function _parseToken(raw) {
+  if (!raw) return null;
+  const str = String(raw).trim();
+  if (str.startsWith('Bearer ')) {
+    return str.substring(7).trim();
+  }
+  return str;
+}
+
 function requireAuth(req, res, next) {
   const config = loadConfig();
   if (!config.pin) return next();
 
-  const authHeader = req.headers['authorization'] || req.headers['x-pocket-token'] || req.query.token;
-  let token = null;
-
-  if (authHeader) {
-    if (authHeader.startsWith('Bearer ')) {
-      token = authHeader.substring(7).trim();
-    } else {
-      token = String(authHeader).trim();
-    }
-  }
-
+  const raw = _extractRawAuth(req);
+  const token = _parseToken(raw);
   if (validateToken(token)) return next();
 
   return res.status(401).json({
@@ -27,4 +35,8 @@ function requireAuth(req, res, next) {
   });
 }
 
-module.exports = { requireAuth };
+module.exports = {
+  requireAuth,
+  _extractRawAuth,
+  _parseToken
+};
