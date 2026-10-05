@@ -1,113 +1,64 @@
 // Lector de streaming para los logs de Antigravity.
-// Cero scraping de pantalla ni extensiones invasivas: Antigravity vuelca todo su razonamiento
-// en un transcript.jsonl en disco. Nos colgamos de ese archivo para retransmitir los pasos en vivo al celular.
-const fs = require('fs');
-const path = require('path');
+// Cero scraping de pantalla: lee reactivamente transcript.jsonl para retransmitir pasos en vivo.
 const chokidar = require('chokidar');
-const { DEFAULT_BRAIN_DIR, listSessions } = require('./reader');
-
-function sanitizeSessionId(id) {
-  if (typeof id !== 'string') return null;
-  const cleaned = path.basename(id.trim());
-  return /^[a-zA-Z0-9_-]+$/.test(cleaned) ? cleaned : null;
-}
+const { DEFAULT_BRAIN_DIR, sanitizeSessionId } = require('./reader');
+const { TranscriptWatcherPort } = require('./transcript-watcher.port');
+const { resolveTargetId, resolveTranscriptPath } = require('./watcher-path-resolver');
+const {
+  resolveInitialPosition,
+  streamNewLines
+} = require('./watcher-line-reader');
 
 class TranscriptWatcher {
-  constructor(options = {}) {
-    this.brainDir = options.brainDir || DEFAULT_BRAIN_DIR;
-    this.onNewStep = options.onNewStep || (() => {});
+  constructor({ brainDir = DEFAULT_BRAIN_DIR, onNewStep = null } = {}) {
+    this.brainDir = brainDir;
+    this.onNewStep = onNewStep || function() {};
     this.activeConversationId = null;
     this.watcher = null;
     this.filePosition = 0;
   }
 
   start(conversationId = null) {
-    if (conversationId) {
-      this.activeConversationId = conversationId;
-    } else {
-      const sessions = listSessions(this.brainDir);
-      if (sessions.length > 0) {
-        this.activeConversationId = sessions[0].id;
-      }
-    }
-
+    this.activeConversationId = resolveTargetId(conversationId, this.brainDir);
     const safeId = sanitizeSessionId(this.activeConversationId);
     if (!safeId) {
-      console.log("[Watcher] No active conversation found to watch.");
+      console.log('[Watcher] No active conversation found to watch.');
       return;
     }
 
-    const safeBase = path.resolve(this.brainDir);
-    const transcriptPath = path.resolve(safeBase, safeId, '.system_generated', 'logs', 'transcript.jsonl');
-    if (!transcriptPath.startsWith(safeBase)) {
-      console.error("[Watcher] Path traversal attempt blocked.");
+    const transcriptPath = resolveTranscriptPath(safeId, this.brainDir);
+    if (!transcriptPath) {
+      console.error('[Watcher] Path traversal attempt blocked.');
       return;
     }
 
     const safeLogPath = transcriptPath.replace(/[\r\n]/g, '');
     console.log(`[Watcher] Watching transcript log: ${safeLogPath}`);
 
-    // Si la conversación ya tiene historia, clavamos el puntero al final del archivo.
-    // No queremos bombardear al celular con los 200 mensajes viejos que ya ocurrieron.
-    if (fs.existsSync(transcriptPath)) {
-      this.filePosition = fs.statSync(transcriptPath).size;
-    } else {
-      this.filePosition = 0;
-    }
+    this.filePosition = resolveInitialPosition(transcriptPath);
+    this.stop();
 
-    if (this.watcher) {
-      this.watcher.close();
-    }
-
-    // En Windows, los eventos nativos de ReadDirectoryChangesW a veces se duermen
-    // con archivos que se abren en modo append muy rápido. Polling de 300ms nunca falla.
     this.watcher = chokidar.watch(transcriptPath, {
       persistent: true,
       usePolling: true,
       interval: 300
     });
 
-    this.watcher.on('change', () => this.readNewLines(transcriptPath));
+    this.watcher.on('change', () => {
+      this.readNewLines(transcriptPath);
+    });
   }
 
   readNewLines(filePath) {
-    try {
-      if (!fs.existsSync(filePath)) return;
-      const stats = fs.statSync(filePath);
-      if (stats.size <= this.filePosition) return;
-
-      // EL TRUCO QUE SALVA LA CPU:
-      // Un transcript.jsonl puede llegar a pesar 50 MB en una sesión larga.
-      // Si leyéramos todo el archivo en cada actualización, la máquina del usuario empezaría a despegar.
-      // Abrimos el stream únicamente desde this.filePosition hasta stats.size para digerir solo lo nuevo.
-      const stream = fs.createReadStream(filePath, {
-        start: this.filePosition,
-        end: stats.size,
-        encoding: 'utf8'
-      });
-
-      let leftover = '';
-
-      stream.on('data', (chunk) => {
-        const text = leftover + chunk;
-        const lines = text.split('\n');
-        leftover = lines.pop();
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const parsed = JSON.parse(line);
-            this.onNewStep(this.activeConversationId, parsed);
-          } catch (_) {}
-        }
-      });
-
-      stream.on('end', () => {
-        this.filePosition = stats.size;
-      });
-    } catch (err) {
-      console.error("[Watcher] Error reading new lines:", err);
-    }
+    streamNewLines(
+      filePath,
+      this.filePosition,
+      this.onNewStep,
+      this.activeConversationId,
+      (newPos) => {
+        this.filePosition = newPos;
+      }
+    );
   }
 
   stop() {
@@ -117,5 +68,8 @@ class TranscriptWatcher {
     }
   }
 }
+
+TranscriptWatcher.TranscriptWatcher = TranscriptWatcher;
+TranscriptWatcher.TranscriptWatcherPort = TranscriptWatcherPort;
 
 module.exports = TranscriptWatcher;

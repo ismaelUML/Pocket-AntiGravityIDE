@@ -4,17 +4,25 @@
 // silenciosos contra http://localhost:3000 y ejecutar código o robar archivos locales.
 // Esta guarda sólo autoriza localhost, IPs privadas de la LAN local y el túnel público activo.
 const os = require('os');
+const { OriginGuardPort } = require('./security.port');
+
+const LOCAL_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1']);
+const PRIVATE_IP_REGEX = /^(10\.\d{1,3}|192\.168|172\.(1[6-9]|2\d|3[0-1]))\.\d{1,3}\.\d{1,3}$/;
 
 function isLocalOrPrivateIp(hostname) {
   if (!hostname) return false;
-  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+  if (LOCAL_HOSTNAMES.has(hostname)) return true;
+  return PRIVATE_IP_REGEX.test(hostname);
+}
 
-  // Rangos IPv4 privados: 10.x.x.x, 172.16.x.x - 172.31.x.x, 192.168.x.x
-  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
-  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
-  if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)) return true;
-
-  return false;
+function _isTunnelOrigin(originUrl, tunnelManager) {
+  try {
+    const pub = tunnelManager?.getStatus?.()?.publicUrl;
+    if (!pub) return false;
+    return originUrl.origin === new URL(pub).origin;
+  } catch (_) {
+    return false;
+  }
 }
 
 function isOriginAllowed(origin, { tunnelManager, activePort } = {}) {
@@ -32,17 +40,7 @@ function isOriginAllowed(origin, { tunnelManager, activePort } = {}) {
     }
 
     // 2. URL del túnel público activo (Cloudflare o Localtunnel)
-    if (tunnelManager && typeof tunnelManager.getStatus === 'function') {
-      const currentPublicUrl = tunnelManager.getStatus().publicUrl;
-      if (currentPublicUrl) {
-        const tunnelUrl = new URL(currentPublicUrl);
-        if (url.origin === tunnelUrl.origin) {
-          return true;
-        }
-      }
-    }
-
-    return false;
+    return _isTunnelOrigin(url, tunnelManager);
   } catch (_) {
     return false;
   }

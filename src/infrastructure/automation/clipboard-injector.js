@@ -41,17 +41,22 @@ function buildArgs(options) {
 
 const { PS_SYSTEM_BIN, extractJsonBlock } = require('./ps-parser');
 
+const DEFAULT_INJECTOR_RESULT = {
+  hwnd: '0x0',
+  pid: 0,
+  title: '',
+  error: null
+};
+
 function parseInjectorOutput(stdout, fallbackText) {
   const parsed = extractJsonBlock(stdout);
   if (!parsed) return null;
 
   return {
+    ...DEFAULT_INJECTOR_RESULT,
+    ...parsed,
     success: Boolean(parsed.Success),
-    hwnd: parsed.HWND || '0x0',
-    pid: parsed.PID || 0,
-    title: parsed.Title || '',
-    textInjected: parsed.TextInjected || fallbackText,
-    error: parsed.Error || null
+    textInjected: parsed.TextInjected || fallbackText
   };
 }
 

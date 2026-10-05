@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ConfigPort } = require('../../core/ports/config.port');
+const { mergeConfigUpdates } = require('./config-validator');
 
 const DEFAULT_CONFIG_PATH = path.join(__dirname, '..', '..', '..', 'pocket.config.json');
 
@@ -22,8 +23,6 @@ class JsonConfigAdapter extends ConfigPort {
         config = { ...config, ...JSON.parse(raw) };
       }
     } catch (err) {
-      // Si el archivo esta corrupto o bloqueado a medio escribir por otro proceso,
-      // no rompemos el servidor: usamos la configuracion por defecto y logueamos advertencia.
       console.warn('[JsonConfigAdapter] Error reading config file, falling back to defaults:', err.message);
     }
 
@@ -36,15 +35,7 @@ class JsonConfigAdapter extends ConfigPort {
 
   saveConfig(updates = {}) {
     const current = this.loadConfig();
-    const next = { ...current, ...updates };
-
-    if (updates.pin !== undefined) {
-      next.pin = String(updates.pin).trim();
-    }
-    if (updates.port !== undefined) {
-      const p = Number.parseInt(updates.port, 10);
-      next.port = (!Number.isNaN(p) && p > 0 && p < 65536) ? p : current.port;
-    }
+    const next = mergeConfigUpdates(current, updates);
 
     try {
       fs.writeFileSync(this.configPath, JSON.stringify(next, null, 2), 'utf8');

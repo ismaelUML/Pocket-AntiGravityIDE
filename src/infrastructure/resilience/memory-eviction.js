@@ -1,69 +1,34 @@
 // Política defensiva de desalojo de memoria (Eviction) y límites de retención.
-// Servicios que corren días enteros en background van acumulando historiales, sets de sesiones
-// y buffers que silent-leakean memoria.
-// Este módulo monitorea el Heap de Node.js y purga registros antiguos en base a límites FIFO/LRU
+// Monitorea el Heap de Node.js y purga registros antiguos en base a límites FIFO
 // o cuando la memoria supera el umbral de advertencia configurado.
+const { EvictionPolicyPort } = require('./resilience.port');
+const { readMemoryStats, evictCollection } = require('./eviction-strategy');
 
 const DEFAULT_MAX_ITEMS = 100;
 const DEFAULT_HEAP_THRESHOLD_MB = 250;
+const PRESSURE_TAG = { true: 'HIGH', false: 'NORMAL' };
 
-class MemoryEvictionGuard {
+class MemoryEvictionGuard extends EvictionPolicyPort {
   constructor({ maxItems = DEFAULT_MAX_ITEMS, heapThresholdMb = DEFAULT_HEAP_THRESHOLD_MB } = {}) {
+    super();
     this.maxItems = maxItems;
     this.heapThresholdBytes = heapThresholdMb * 1024 * 1024;
   }
 
-  /**
-   * Obtiene métricas actuales del heap de Node.js
-   */
   getMemoryStats() {
-    const mem = process.memoryUsage();
-    return {
-      heapUsedMb: Math.round(mem.heapUsed / (1024 * 1024)),
-      heapTotalMb: Math.round(mem.heapTotal / (1024 * 1024)),
-      rssMb: Math.round(mem.rss / (1024 * 1024)),
-      isPressureHigh: mem.heapUsed > this.heapThresholdBytes
-    };
+    return readMemoryStats(this.heapThresholdBytes);
   }
 
-  /**
-   * Aplica la política de desalojo sobre una colección de tipo Set o Map.
-   * Si supera el límite o hay presión de memoria, elimina los elementos más antiguos (FIFO).
-   * @param {Set|Map|Array} collection
-   * @param {number} [targetLimit]
-   * @returns {number} Cantidad de elementos desalojados
-   */
   evictOldest(collection, targetLimit = this.maxItems) {
-    let evictedCount = 0;
     const isHigh = process.memoryUsage().heapUsed > this.heapThresholdBytes;
-    const effectiveLimit = isHigh ? Math.floor(targetLimit * 0.7) : targetLimit;
+    const limit = isHigh ? Math.floor(targetLimit * 0.7) : targetLimit;
+    const count = evictCollection(collection, limit);
 
-    if (collection instanceof Set) {
-      while (collection.size > effectiveLimit) {
-        const oldest = collection.values().next().value;
-        if (oldest === undefined) break;
-        collection.delete(oldest);
-        evictedCount++;
-      }
-    } else if (collection instanceof Map) {
-      while (collection.size > effectiveLimit) {
-        const oldestKey = collection.keys().next().value;
-        if (oldestKey === undefined) break;
-        collection.delete(oldestKey);
-        evictedCount++;
-      }
-    } else if (Array.isArray(collection)) {
-      while (collection.length > effectiveLimit) {
-        collection.shift();
-        evictedCount++;
-      }
+    if (count > 0) {
+      console.log(`[MemoryEvictionGuard] Evicted ${count} stale entries (Heap pressure: ${PRESSURE_TAG[Boolean(isHigh)]}).`);
     }
 
-    if (evictedCount > 0) {
-      console.log(`[MemoryEvictionGuard] Evicted ${evictedCount} stale entries (Heap pressure: ${isHigh ? 'HIGH' : 'NORMAL'}).`);
-    }
-
-    return evictedCount;
+    return count;
   }
 }
 
