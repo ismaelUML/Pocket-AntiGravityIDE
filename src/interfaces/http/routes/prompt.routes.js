@@ -52,6 +52,15 @@ function createPromptRoutes({ sendPromptUseCase, ideAutomationPort, upload }) {
     res.json(state);
   });
 
+  router.post('/abort', requireAuth, async (_req, res) => {
+    try {
+      const result = await ideAutomationPort.abortCurrentTurn();
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   return router;
 }
 

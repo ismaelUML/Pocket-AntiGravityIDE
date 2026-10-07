@@ -2,6 +2,7 @@ const { IdeAutomationPort } = require('../../core/ports/ide-automation.port');
 const PromptQueue = require('./queue');
 const { getChatState } = require('./check-chat-state');
 const { triggerIdeAccept } = require('./diff-acceptor');
+const { triggerIdeAbort } = require('./agent-aborter');
 
 /**
  * Windows Win32 OS automation adapter implementing IdeAutomationPort.
@@ -31,6 +32,10 @@ class Win32AutomationAdapter extends IdeAutomationPort {
 
   async acceptFocusedHunk() {
     return await triggerIdeAccept();
+  }
+
+  async abortCurrentTurn() {
+    return await triggerIdeAbort();
   }
 
   async getChatState() {

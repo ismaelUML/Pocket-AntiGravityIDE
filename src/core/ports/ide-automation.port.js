@@ -22,6 +22,10 @@ class IdeAutomationPort {
   getPendingQueueCount() {
     throw new Error('Method not implemented.');
   }
+
+  async abortCurrentTurn() {
+    throw new Error('Method not implemented.');
+  }
 }
 
 module.exports = { IdeAutomationPort };

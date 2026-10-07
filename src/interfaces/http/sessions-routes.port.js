@@ -26,6 +26,10 @@ class PromptRoutesPort {
   handleGetStatus(_req, _res) {
     throw new Error('PromptRoutesPort.handleGetStatus must be implemented');
   }
+
+  handleAbortPrompt(_req, _res) {
+    throw new Error('PromptRoutesPort.handleAbortPrompt must be implemented');
+  }
 }
 
 class PersonasRoutesPort {
