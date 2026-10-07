@@ -1,5 +1,6 @@
 import { authFetch } from '../auth.js';
 import { playSubtleAcceptSound } from './diff-view.js';
+import { playNotificationChime, triggerHapticPulse } from '../sound-notifier.js';
 
 let activeSessionId = null;
 let selectedFile = null;
@@ -172,24 +173,90 @@ export function scrollToBottom() {
   }
 }
 
-export function renderMessage(role, text) {
-  if (!text || !chatContainer) return;
+function getToolIcon(name = '') {
+  const n = String(name).toLowerCase();
+  if (n.includes('command')) return '💻';
+  if (n.includes('view') || n.includes('read')) return '📄';
+  if (n.includes('write') || n.includes('replace') || n.includes('edit')) return '✏️';
+  if (n.includes('search') || n.includes('grep')) return '🔍';
+  if (n.includes('list') || n.includes('dir')) return '📁';
+  return '⚙️';
+}
+
+function getToolDetail(tc) {
+  if (!tc || !tc.args) return '';
+  const args = tc.args;
+  if (args.CommandLine) return args.CommandLine;
+  if (args.AbsolutePath) return args.AbsolutePath.split(/[\\/]/).pop();
+  if (args.TargetFile) return args.TargetFile.split(/[\\/]/).pop();
+  if (args.Query || args.query) return `"${args.Query || args.query}"`;
+  if (args.DirectoryPath) return args.DirectoryPath.split(/[\\/]/).pop();
+  return tc.toolAction || '';
+}
+
+export function createToolCallsElement(toolCalls) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return null;
+  const container = document.createElement('div');
+  container.className = 'tool-calls-container';
+
+  toolCalls.forEach((tc) => {
+    const card = document.createElement('div');
+    card.className = 'tool-call-card';
+
+    const header = document.createElement('div');
+    header.className = 'tool-call-header';
+
+    const icon = getToolIcon(tc.name || '');
+    const title = tc.toolSummary || tc.name || 'Tool Execution';
+    header.innerHTML = `
+      <span class="tool-call-pulse"></span>
+      <span class="tool-icon">${icon}</span>
+      <span class="tool-title">${title}</span>
+    `;
+    card.appendChild(header);
+
+    const detail = getToolDetail(tc);
+    if (detail) {
+      const detailEl = document.createElement('div');
+      detailEl.className = 'tool-call-detail';
+      detailEl.textContent = detail;
+      card.appendChild(detailEl);
+    }
+
+    container.appendChild(card);
+  });
+
+  return container;
+}
+
+export function renderMessage(role, text, toolCalls = []) {
+  if (!chatContainer) return;
+  const hasText = Boolean(text && String(text).trim());
+  const hasTools = Array.isArray(toolCalls) && toolCalls.length > 0;
+  if (!hasText && !hasTools) return;
+
   const msgDiv = document.createElement('div');
   msgDiv.className = `message ${role}`;
 
   const meta = document.createElement('div');
   meta.className = 'meta';
   meta.textContent = role === 'user' ? 'You' : 'Antigravity Assistant';
-
-  const body = document.createElement('div');
-  body.className = 'message-body';
-  body.innerHTML = parseMarkdown(text);
-
   msgDiv.appendChild(meta);
-  msgDiv.appendChild(body);
+
+  if (hasTools) {
+    const toolsEl = createToolCallsElement(toolCalls);
+    if (toolsEl) msgDiv.appendChild(toolsEl);
+  }
+
+  if (hasText) {
+    const body = document.createElement('div');
+    body.className = 'message-body';
+    body.innerHTML = parseMarkdown(text);
+    msgDiv.appendChild(body);
+  }
 
   // If assistant presented an implementation plan or requests review, append 1-tap quick action bar
-  if (role === 'assistant' && /implementation_plan\.md|#\s+Implementation Plan|User Review Required|explicit approval before proceeding|Say 'Proceed'/i.test(text)) {
+  if (role === 'assistant' && hasText && /implementation_plan\.md|#\s+Implementation Plan|User Review Required|explicit approval before proceeding|Say 'Proceed'/i.test(text)) {
     const planBar = document.createElement('div');
     planBar.className = 'plan-quick-action-bar';
     planBar.innerHTML = `
@@ -218,9 +285,18 @@ export function appendMessageFromStep(step) {
   if (step.type === 'USER_INPUT' || step.source === 'USER_EXPLICIT') {
     role = 'user';
   }
-  let text = typeof step.content === 'string' ? step.content : JSON.stringify(step.content);
-  if (text) {
-    renderMessage(role, text);
+  let text = typeof step.content === 'string' ? step.content : (step.content ? JSON.stringify(step.content) : '');
+  const toolCalls = step.toolCalls || step.tool_calls || [];
+  renderMessage(role, text, toolCalls);
+
+  // Alertas al terminar turno
+  if (role === 'assistant') {
+    const abortBtn = document.getElementById('abort-btn');
+    if (abortBtn && step.status === 'DONE') {
+      abortBtn.style.display = 'none';
+      playNotificationChime();
+      triggerHapticPulse([150, 80, 150]);
+    }
   }
 }
 
@@ -350,12 +426,66 @@ export async function loadMessages(sessionId) {
 
     chatContainer.innerHTML = '';
     data.messages.forEach((msg) => {
-      renderMessage(msg.role, msg.content);
+      renderMessage(msg.role, msg.content, msg.toolCalls || []);
     });
     scrollToBottom();
   } catch (err) {
     console.error('Error loading messages:', err);
   }
+}
+
+// Remote Stop / Abort Handler (Ctrl + D)
+export async function handleAbort() {
+  const abortBtn = document.getElementById('abort-btn');
+  if (abortBtn) {
+    abortBtn.disabled = true;
+    abortBtn.innerHTML = '<span>⏳ Aborting...</span>';
+  }
+  try {
+    const res = await authFetch('/api/prompt/abort', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      showToast('🛑 Turno abortado (Ctrl+D)', 'info');
+      triggerHapticPulse([100, 50, 100]);
+    } else {
+      showToast(`Aviso: ${data.message || 'Ventana no encontrada'}`, 'warning');
+    }
+  } catch (err) {
+    showToast(`Error al abortar: ${err.message}`, 'error');
+  } finally {
+    if (abortBtn) {
+      abortBtn.disabled = false;
+      abortBtn.innerHTML = '<span>🛑 Stop</span>';
+      abortBtn.style.display = 'none';
+    }
+  }
+}
+
+// Quick Actions Handler
+export function initQuickActions() {
+  const bar = document.getElementById('quick-actions-bar');
+  if (!bar || !promptInput) return;
+
+  bar.addEventListener('click', (e) => {
+    const chip = e.target.closest('.quick-action-chip');
+    if (!chip) return;
+    const action = chip.getAttribute('data-action');
+    if (!action) return;
+
+    if (action === '/plan' || action === '/grill-me') {
+      promptInput.value = `${action} ${promptInput.value}`.trim();
+      promptInput.focus();
+    } else if (action === 'run_tests') {
+      promptInput.value = 'Corre todos los tests automatizados del proyecto y reporta si pasa todo.';
+      handleSend();
+    } else if (action === 'undo_changes') {
+      promptInput.value = 'Descarta todos los cambios sin commitear usando git restore.';
+      handleSend();
+    } else if (action === 'explain') {
+      promptInput.value = 'Explicame en 2 oraciones sencillas qué cambios propusiste y por qué.';
+      handleSend();
+    }
+  });
 }
 
 // Send Prompt Handler
@@ -371,6 +501,9 @@ export async function handleSend() {
   renderMessage('user', text || '[Attachment]');
   promptInput.value = '';
   promptInput.style.height = '42px';
+
+  const abortBtn = document.getElementById('abort-btn');
+  if (abortBtn) abortBtn.style.display = 'inline-flex';
 
   const formData = new FormData();
   if (text) formData.append('text', text);
@@ -390,14 +523,21 @@ export async function handleSend() {
     const data = await res.json();
     if (!data.success) {
       alert(`Send Error: ${data.error}`);
+      if (abortBtn) abortBtn.style.display = 'none';
     }
   } catch (err) {
     alert(`Failed to send prompt: ${err.message}`);
+    if (abortBtn) abortBtn.style.display = 'none';
   }
 }
 
 export function initChatView() {
   if (sendBtn) sendBtn.addEventListener('click', handleSend);
+
+  const abortBtn = document.getElementById('abort-btn');
+  if (abortBtn) abortBtn.addEventListener('click', handleAbort);
+
+  initQuickActions();
 
   if (promptInput) {
     promptInput.addEventListener('keydown', (e) => {

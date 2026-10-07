@@ -2142,4 +2142,134 @@ textarea#prompt-input:focus {
   font-weight: 600 !important;
 }
 
-/* Demo File 2: Ready to Swipe & Commit */
+/* Remote Stop / Abort Button */
+.btn-abort {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  height: 42px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 0.82rem;
+  transition: all var(--transition-fast);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
+  animation: abortPulse 1.8s infinite ease-in-out;
+}
+
+.btn-abort:hover {
+  background: rgba(239, 68, 68, 0.35);
+  border-color: #ef4444;
+  transform: translateY(-1px);
+}
+
+.btn-abort:active {
+  transform: scale(0.96);
+}
+
+@keyframes abortPulse {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* Quick Action Slash Commands Bar */
+.quick-actions-bar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 0 6px 0;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.quick-actions-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.quick-action-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.quick-action-chip:hover {
+  background: var(--bg-hover);
+  color: var(--text-bright);
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+}
+
+.quick-action-chip:active {
+  transform: scale(0.96);
+}
+
+/* Live Activity Stream & Tool Calls */
+.tool-calls-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.tool-call-card {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  transition: all var(--transition-fast);
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tool-call-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  animation: toolPulse 1.2s infinite ease-in-out;
+  display: inline-block;
+}
+
+@keyframes toolPulse {
+  0% { transform: scale(0.8); opacity: 0.5; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.8); opacity: 0.5; }
+}
+
+.tool-call-detail {
+  font-family: var(--font-code);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

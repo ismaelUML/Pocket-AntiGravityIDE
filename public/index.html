@@ -62,6 +62,8 @@
           <span class="status-dot" style="background:#858585"></span> <span>Chat: Checking...</span>
         </div>
         <button id="pwa-install-btn" class="theme-toggle-btn" title="Install Pocket IDE App" style="display: none;">📥</button>
+        <button id="wakelock-btn" class="theme-toggle-btn" title="Toggle Screen Wake-Lock">👁️</button>
+        <button id="sound-btn" class="theme-toggle-btn" title="Toggle Audio Notifications">🔔</button>
         <button id="lock-btn" class="theme-toggle-btn" title="Lock App" style="display: none;">🔒</button>
         <button id="theme-toggle-btn" class="theme-toggle-btn" title="Toggle Theme">🌙</button>
       </div>
@@ -273,6 +275,14 @@
       <span id="persona-badge" class="persona-badge">⚡ Pair Dev</span>
     </div>
 
+    <div id="quick-actions-bar" class="quick-actions-bar">
+      <button type="button" class="quick-action-chip" data-action="/plan" title="Plan before coding">📋 /plan</button>
+      <button type="button" class="quick-action-chip" data-action="/grill-me" title="Interview to align requirements">❓ /grill-me</button>
+      <button type="button" class="quick-action-chip" data-action="run_tests" title="Execute tests">🧪 Run Tests</button>
+      <button type="button" class="quick-action-chip" data-action="undo_changes" title="Discard uncommitted changes">↩️ Discard Changes</button>
+      <button type="button" class="quick-action-chip" data-action="explain" title="Explain in simple terms">💡 Explain Simply</button>
+    </div>
+
     <div id="attachment-preview" class="attachment-preview">
       <span>📎 Attached:</span>
       <span id="preview-name">file.png</span>
@@ -282,6 +292,9 @@
       <button id="mic-btn" class="btn-icon" title="Voice Dictation (Walkie-Talkie)">🎙️</button>
       <input type="file" id="file-input" accept="image/*" style="display: none;">
       <textarea id="prompt-input" rows="1" placeholder="Ask Antigravity IDE..." aria-label="Prompt Input" spellcheck="false" autocomplete="off"></textarea>
+      <button id="abort-btn" class="btn-abort" title="Cancel Bot Turn (Ctrl + D)" style="display: none;">
+        <span>🛑 Stop</span>
+      </button>
       <button id="send-btn" class="btn-send" title="Send Prompt">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
       </button>

@@ -20,7 +20,14 @@ test('Transcript Reader & Watcher Isolation', async (t) => {
   const transcriptFile = path.join(logsDir, 'transcript.jsonl');
   const step1 = JSON.stringify({ step_index: 0, type: 'USER_INPUT', content: 'Hello Antigravity!' });
   const step2 = JSON.stringify({ step_index: 1, type: 'PLANNER_RESPONSE', content: 'I am here to help.' });
-  fs.writeFileSync(transcriptFile, `${step1}\n${step2}\n`);
+  const step3 = JSON.stringify({
+    step_index: 2,
+    type: 'PLANNER_RESPONSE',
+    content: '',
+    tool_calls: [{ name: 'run_command', args: { CommandLine: 'npm test' }, toolSummary: 'Run tests' }],
+    status: 'DONE'
+  });
+  fs.writeFileSync(transcriptFile, `${step1}\n${step2}\n${step3}\n`);
 
   await t.test('listSessions finds and parses session metadata', () => {
     const sessions = listSessions(tmpBrain);
@@ -34,11 +41,14 @@ test('Transcript Reader & Watcher Isolation', async (t) => {
 
   await t.test('readTranscript loads structured messages from jsonl', async () => {
     const messages = await readTranscript('session-abc', tmpBrain);
-    assert.strictEqual(messages.length, 2);
+    assert.strictEqual(messages.length, 3);
     assert.strictEqual(messages[0].role, 'user');
     assert.strictEqual(messages[0].content, 'Hello Antigravity!');
     assert.strictEqual(messages[1].role, 'assistant');
     assert.strictEqual(messages[1].content, 'I am here to help.');
+    assert.strictEqual(messages[2].role, 'assistant');
+    assert.strictEqual(messages[2].toolCalls.length, 1);
+    assert.strictEqual(messages[2].toolCalls[0].name, 'run_command');
 
     const notFound = await readTranscript('invalid-session', tmpBrain);
     assert.deepStrictEqual(notFound, []);

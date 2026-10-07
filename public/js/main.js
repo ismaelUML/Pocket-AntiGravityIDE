@@ -12,13 +12,35 @@ import {
 import { initDiffView, checkChanges, updateChangesBanner } from './views/diff-view.js';
 import { initFilesView, loadWorkspaceTree } from './views/files-view.js';
 import { PwaManager } from './pwa.js';
+import { toggleSound, isSoundEnabled, playNotificationChime, triggerHapticPulse } from './sound-notifier.js';
+import { toggleWakeLock, isWakeLockActive } from './wake-lock.js';
 
 // DOM Elements
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
+const soundBtn = document.getElementById('sound-btn');
+const wakelockBtn = document.getElementById('wakelock-btn');
 const tabChatBtn = document.getElementById('tab-chat-btn');
 const tabFilesBtn = document.getElementById('tab-files-btn');
 const chatContainer = document.getElementById('chat-container');
 const filesContainer = document.getElementById('files-container');
+
+// Sound Notification Toggle
+if (soundBtn) {
+  soundBtn.textContent = isSoundEnabled() ? '🔔' : '🔕';
+  soundBtn.addEventListener('click', () => {
+    const active = toggleSound();
+    soundBtn.textContent = active ? '🔔' : '🔕';
+  });
+}
+
+// Screen Wake-Lock Toggle
+if (wakelockBtn) {
+  wakelockBtn.addEventListener('click', async () => {
+    const active = await toggleWakeLock();
+    wakelockBtn.style.color = active ? 'var(--accent-success)' : '';
+    wakelockBtn.title = active ? 'Screen Wake-Lock: ACTIVE' : 'Toggle Screen Wake-Lock';
+  });
+}
 
 // Theme Switcher Logic
 function initTheme() {
@@ -61,6 +83,8 @@ function startApp() {
   initWebSocket({
     onChangesUpdated: () => {
       checkChanges();
+      playNotificationChime();
+      triggerHapticPulse([150, 80, 150]);
     },
     onTranscriptStep: (data) => {
       if (getActiveSessionId() === 'NEW_PENDING_SESSION') {
