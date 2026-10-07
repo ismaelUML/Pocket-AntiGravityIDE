@@ -32,11 +32,12 @@ function getChatState(targetTitle = 'Antigravity IDE', processName = 'Antigravit
         });
       }
 
-      const parsed = extractJsonBlock(stdout);
-      if (parsed) {
-        return resolve({
-          windowFound: Boolean(parsed.WindowFound),
-          isWindowForeground: Boolean(parsed.IsWindowForeground),
+      try {
+        const parsed = extractJsonBlock(stdout);
+        if (parsed) {
+          return resolve({
+            windowFound: Boolean(parsed.WindowFound),
+            isWindowForeground: Boolean(parsed.IsWindowForeground),
             isChatOpen: Boolean(parsed.IsChatOpen),
             isChatFocused: Boolean(parsed.IsChatFocused),
             stateString: parsed.StateString || 'CLOSED'
