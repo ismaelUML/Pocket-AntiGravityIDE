@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.8.0] - 2026-10-07
+
+### 🛑 Remote Turn Abort (Ctrl + D), Live Tool Calls & Mobile Haptics
+- **Native OS Remote Turn Cancellation (`Ctrl + D`)**:
+  - Added Win32 P/Invoke automation (`src/infrastructure/automation/native/abort-injector.ps1`) targeting Antigravity IDE (`Chrome_WidgetWin_1`).
+  - Synthesizes `VK_CONTROL` (`0x11`) + `VK_D` (`0x44`) via `keybd_event` to abort agent turns immediately from phone.
+  - Added REST endpoint `POST /api/prompt/abort` protected by HMAC PIN verification.
+  - Pulsing `🛑 Stop` button in mobile chat view with toast notifications and haptic feedback.
+- **Live Activity Stream & Real-Time Tool Calls**:
+  - Expanded `chat-view.js` to render `step.toolCalls` in real-time, eliminating dead screens during tool execution.
+  - Dedicated badges for `run_command` (💻), `view_file` (📄), edits (✏️), and searches (🔍) with pulsing activity indicators.
+- **Haptic Feedback & Web Audio Notifications**:
+  - Integrated `public/js/sound-notifier.js` synthesizing soft harmonic chimes (880Hz -> 1320Hz) via native Web Audio API with zero audio files.
+  - Tactile mobile vibration alerts (`navigator.vibrate([150, 80, 150])`) when agent turns finish or working tree diffs change.
+  - Toggle button in header (`🔔` / `🔕`) with persistence in `localStorage`.
+- **Mobile Screen Wake-Lock**:
+  - Added `public/js/wake-lock.js` using `navigator.wakeLock.request('screen')` to prevent mobile displays from going to sleep during long tasks.
+  - Status toggle (`👁️`) in header with automatic re-lock on visibility change.
+- **Quick Action Slash Commands Bar**:
+  - Docked quick action chips above mobile input: `📋 /plan`, `❓ /grill-me`, `🧪 Run Tests`, `↩️ Discard Changes`, `💡 Explain Simply`.
+- **Automated Tests**:
+  - Added `tests/unit/abort-prompt.test.js` verifying `IdeAutomationPort.abortCurrentTurn()` and `POST /api/prompt/abort` (101/101 tests passing).
+
+---
+
 ## [1.6.0] - 2026-09-12
 
 ### 🎛️ Desktop Host Control Center & Mobile PWA
